@@ -111,16 +111,16 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 • UDP Custom  : \`${s.port.udpcustom}\`
 ────────────────────────
 🧩 *Payload WS*:
-\`\`\`
+\`
 GET / HTTP/1.1
 Host: ${s.hostname}
 Connection: Upgrade
 User-Agent: [ua]
 Upgrade: websocket
-\`\`\`
+\`
 
 🧩 *Payload Enhanced*:
-\`\`\`
+\`
 PATCH / HTTP/1.1
 Host: ${s.hostname}
 Host: bug.com
@@ -160,6 +160,61 @@ https://drive.google.com/file/d/1Sj37lUzkizp2-OoriCgVUC1IDRGlP1e3/view?usp=shari
     });
   });
 }
+
+async function trialzivudp(username, password, exp, iplimit, serverId) {
+  console.log(`Creating ZIV UDP trial on server ${serverId} with expiry ${exp} days`);
+
+  return new Promise((resolve) => {
+    db.get('SELECT * FROM Server WHERE id = ?', [serverId], (err, server) => {
+      if (err || !server) {
+        console.error('❌ Error fetching server:', err?.message || 'server null');
+        return resolve('❌ Server tidak ditemukan. Silakan coba lagi.');
+      }
+
+      const domain = server.domain;
+      const AUTH_TOKEN = server.auth;
+      const curlCommand = `curl --fail --connect-timeout 1 --max-time 30 "http://${domain}:5888/trial/zivpn?exp=${exp}&auth=${AUTH_TOKEN}"`;
+
+      exec(curlCommand, (err, stdout, stderr) => {
+        if (err) {
+          console.error("❌ Curl error:", err.message);
+          if (stderr) console.error("🪵 stderr:", stderr);
+          return resolve("❌ Gagal menghubungi server.");
+        }
+
+        const out = (stdout || "").trim();
+        if (!out) return resolve("❌ Respon server kosong / tidak valid.");
+
+        let d;
+        try { d = JSON.parse(out); } catch (e) {
+          console.error("❌ JSON parse error:", e.message);
+          console.error("🪵 Output:", out);
+          return resolve("❌ Respon server tidak valid (bukan JSON).");
+        }
+
+        if (typeof d !== "object" || !("status" in d)) return resolve("❌ Respon server tidak dikenali.");
+        if (d.status !== "success") return resolve(`❌ ${d.message || "Permintaan gagal."}`);
+
+        if (exp >= 1 && exp <= 135) {
+          db.run('UPDATE Server SET total_create_akun = total_create_akun + 1 WHERE id = ?', [serverId]);
+        }
+
+        const msg = `${d.message}
+
+📘 *TUTORIAL PASANG ZIVPN*
+📂 Google Drive:
+https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
+
+📌 *Langkah Singkat:*
+1️⃣ Buka link di atas  
+2️⃣ Ikuti panduan di dalam video
+3️⃣ Selesai & Connect 🚀`;
+        return resolve(msg);
+      });
+    });
+  });
+}
+
 async function trialvmess(username, exp, quota, limitip, serverId) {
   console.log(`Creating VMess account for ${username} with expiry ${exp} days, quota ${quota} GB, IP limit ${limitip}`);
 
@@ -661,53 +716,7 @@ Save Account Link: [Save Account](https://${shadowsocksData.domain}:81/shadowsoc
   });
 }
 
-
-
-async function trialzivudp(username, password, exp, iplimit, serverId) {
-  return new Promise((resolve) => {
-    db.get('SELECT * FROM Server WHERE id = ?', [serverId], (err, server) => {
-      if (err || !server) return resolve('❌ Server tidak ditemukan. Silakan coba lagi.');
-      const web_URL = `http://${server.domain}/vps/trialsshvpn`;
-      const AUTH_TOKEN = server.auth;
-      const curlCommand = `curl -sS --connect-timeout 1 --max-time 30 -X POST "${web_URL}" \
--H "Authorization: ${AUTH_TOKEN}" \
--H "Content-Type: application/json" \
--H "Accept: application/json" \
--d '{"timelimit":"3h"}'`;
-      exec(curlCommand, (err, stdout, stderr) => {
-        if (err) return resolve('❌ Gagal menghubungi server.');
-        const out = (stdout || '').trim();
-        if (!out) return resolve('❌ Respon server kosong / tidak valid.');
-        if (!(out.startsWith('{') || out.startsWith('['))) return resolve('❌ Format respon dari server tidak valid (bukan JSON).');
-        let d; try { d = JSON.parse(out); } catch (e) { return resolve('❌ Respon server tidak valid (JSON rusak).'); }
-        if (d?.meta?.code !== 200 || !d?.data) {
-          const errMsg = d?.message || d?.meta?.message || JSON.stringify(d);
-          return resolve(`❌ Respons error:
-${errMsg}`);
-        }
-        const s = d.data;
-        db.run('UPDATE Server SET total_create_akun = total_create_akun + 1 WHERE id = ?', [serverId], () => {});
-        const msg = `🎁 *Trial Account ZIVPN UDP*
-────────────────────────
-📡 *DOMAIN*    : \`udp-${s.hostname || server.domain}\`
-🔑 *Password*  : \`${s.username || '-'}\`
-⏰ *Duration*  : \`3 Hour\`
-
-📘 *TUTORIAL PASANG ZIVPN*
-📂 Google Drive:
-https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
-────────────────────────
-
-*© Telegram Bots - 2025*
-✨ Terima kasih telah menggunakan layanan kami!
-`;
-        return resolve(msg);
-      });
-    });
-  });
-}
-
-module.exports = { trialssh, trialvmess, trialvless, trialtrojan, trialshadowsocks, trialzivudp }; 
+module.exports = { trialssh, trialvmess, trialvless, trialtrojan, trialshadowsocks }; 
 
 
 

@@ -73,16 +73,16 @@ async function checkconfigsshvpn(username, password, exp, iplimit, serverId) {
 • UDP Custom  : \`${s.port.udpcustom}\`
 ────────────────────────
 🧩 *Payload WS*:
-\`
+\`\`\`
 GET / HTTP/1.1
 Host: ${s.hostname}
 Connection: Upgrade
 User-Agent: [ua]
 Upgrade: websocket
-\`
+\`\`\`
 
 🧩 *Payload Enhanced*:
-\`
+\`\`\`
 PATCH / HTTP/1.1
 Host: ${s.hostname}
 Host: bug.com

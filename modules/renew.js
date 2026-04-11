@@ -100,57 +100,6 @@ if (!/^[a-z0-9-]+$/.test(username)) {
     });
   });
 }
-
-async function renewzivudp(username, password, exp, iplimit, serverId) {
-  console.log(`Renewing ZIV UDP for ${password} with expiry ${exp} days on server ${serverId}`);
-
-  return new Promise((resolve) => {
-    db.get('SELECT * FROM Server WHERE id = ?', [serverId], (err, server) => {
-      if (err || !server) {
-        console.error('❌ Error fetching server:', err?.message || 'server null');
-        return resolve('❌ Server tidak ditemukan. Silakan coba lagi.');
-      }
-
-      const domain = server.domain;
-      const AUTH_TOKEN = server.auth;
-      const curlCommand = `curl --fail --connect-timeout 1 --max-time 30 "http://${domain}:5888/renew/zivpn?password=${password}&exp=${exp}&auth=${AUTH_TOKEN}"`;
-
-      exec(curlCommand, (err, stdout, stderr) => {
-        if (err) {
-          console.error("❌ Curl error:", err.message);
-          if (stderr) console.error("🪵 stderr:", stderr);
-          return resolve("❌ Gagal menghubungi server.");
-        }
-
-        const out = (stdout || "").trim();
-        if (!out) return resolve("❌ Respon server kosong / tidak valid.");
-
-        let d;
-        try { d = JSON.parse(out); } catch (e) {
-          console.error("❌ JSON parse error:", e.message);
-          console.error("🪵 Output:", out);
-          return resolve("❌ Respon server tidak valid (bukan JSON).");
-        }
-
-        if (typeof d !== "object" || !("status" in d)) return resolve("❌ Respon server tidak dikenali.");
-        if (d.status !== "success") return resolve(`❌ ${d.message || "Permintaan gagal."}`);
-
-        const msg = `${d.message}
-
-📘 *TUTORIAL PASANG ZIVPN*
-📂 Google Drive:
-https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
-
-📌 *Langkah Singkat:*
-1️⃣ Buka link di atas  
-2️⃣ Ikuti panduan di dalam video
-3️⃣ Selesai & Connect 🚀`;
-        return resolve(msg);
-      });
-    });
-  });
-}
-
 async function renewvmess(username, exp, quota, limitip, serverId) {
   console.log(`Renewing VMess account for ${username} with expiry ${exp} days, quota ${quota} GB, limit IP ${limitip}`);
 
@@ -504,4 +453,54 @@ if (!/^[a-z0-9-]+$/.test(username)) {
     });
   }
   
-  module.exports = { renewshadowsocks, renewtrojan, renewvless, renewvmess, renewssh };
+
+
+async function renewzivudp(username, exp, limitip, serverId) {
+  if (!/^[a-z0-9-]+$/.test(username)) {
+    return '❌ Username akun ZIV UDP tidak valid. Gunakan huruf kecil, angka, atau tanda strip (-) tanpa spasi.';
+  }
+  return new Promise((resolve) => {
+    db.get('SELECT * FROM Server WHERE id = ?', [serverId], (err, server) => {
+      if (err || !server) return resolve('❌ Server tidak ditemukan. Silakan coba lagi.');
+      const web_URL = `http://${server.domain}/vps/renewsshvpn`;
+      const AUTH_TOKEN = server.auth;
+      const curlCommand = `curl -sS --connect-timeout 1 --max-time 30 --fail -X PATCH "${web_URL}/${username}/${exp}" \
+-H "Authorization: ${AUTH_TOKEN}" \
+-H "accept: application/json" \
+-H "Content-Type: application/json" \
+-d '{"kuota": 0}'`;
+      exec(curlCommand, (err, stdout, stderr) => {
+        if (err) return resolve('❌ Gagal menghubungi server.');
+        const out = (stdout || '').trim();
+        if (!out) return resolve('❌ Respon server kosong / tidak valid.');
+        if (!(out.startsWith('{') || out.startsWith('['))) return resolve('❌ Format respon dari server tidak valid (bukan JSON).');
+        let d; try { d = JSON.parse(out); } catch (e) { return resolve('❌ Respon server tidak valid (JSON rusak).'); }
+        if (d?.meta?.code !== 200 || !d?.data) {
+          const errMsg = d?.message || d?.meta?.message || JSON.stringify(d);
+          return resolve(`❌ Respons error:
+${errMsg}`);
+        }
+        const s = d.data;
+        const msg = `♻️ *Account ZIVPN UDP Renewed Successfully!*
+────────────────────────
+📡 *Host*         : \`${s.hostname || server.domain}\`
+🔑 *Password*     : \`${s.username || username}\`
+📅 *Expiry Date*  : \`${s.to || s.exp || `${exp} Hari`}\`
+🕒 *Dari*         : \`${s.from || '-'}\`
+🕒 *Sampai*       : \`${s.to || '-'}\`
+
+📘 *TUTORIAL PASANG ZIVPN*
+📂 Google Drive:
+https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
+────────────────────────
+
+*© Telegram Bots - 2025*
+✨ Akun ZIVPN UDP berhasil diperpanjang.
+`;
+        return resolve(msg);
+      });
+    });
+  });
+}
+
+module.exports = { renewshadowsocks, renewtrojan, renewvless, renewvmess, renewssh, renewzivudp };

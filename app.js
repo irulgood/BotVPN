@@ -30,38 +30,38 @@ app.use(express.urlencoded({ extended: true }));
 
 const { 
   createssh, 
+  createzivudp, 
   createvmess, 
   createvless, 
   createtrojan, 
-  createshadowsocks,
-  createzivudp 
+  createshadowsocks 
 } = require('./modules/create');
 
 const { 
   trialssh, 
+  trialzivudp, 
   trialvmess, 
   trialvless, 
   trialtrojan, 
-  trialshadowsocks,
-  trialzivudp 
+  trialshadowsocks 
 } = require('./modules/trial');
 
 const { 
   renewssh, 
+  renewzivudp, 
   renewvmess, 
   renewvless, 
   renewtrojan, 
-  renewshadowsocks,
-  renewzivudp 
+  renewshadowsocks 
 } = require('./modules/renew');
 
 const { 
   delssh, 
+  delzivudp, 
   delvmess, 
   delvless, 
   deltrojan, 
-  delshadowsocks,
-  delzivudp 
+  delshadowsocks 
 } = require('./modules/del');
 
 const { 
@@ -158,38 +158,6 @@ const AUTH_USER = vars.AUTH_USERNAME_ORKUT;  // username orderkuota
 const AUTH_TOKEN = vars.AUTH_TOKEN_ORKUT;    // token orderkuota
 
 const bot = new Telegraf(BOT_TOKEN);
-
-async function safeReplyMessage(ctx, text, extra = {}) {
-  try {
-    return await ctx.reply(text, extra);
-  } catch (error) {
-    logger.error(`Reply gagal, fallback ke plain text: ${error.message}`);
-    const fallback = { ...extra };
-    delete fallback.parse_mode;
-    try {
-      return await ctx.reply(text, fallback);
-    } catch (err2) {
-      logger.error(`Fallback reply juga gagal: ${err2.message}`);
-      return null;
-    }
-  }
-}
-
-async function safeGroupSend(text, extra = {}) {
-  try {
-    return await bot.telegram.sendMessage(GROUP_ID, text, extra);
-  } catch (error) {
-    logger.error(`Notif grup gagal, fallback ke plain text: ${error.message}`);
-    const fallback = { ...extra };
-    delete fallback.parse_mode;
-    try {
-      return await bot.telegram.sendMessage(GROUP_ID, text, fallback);
-    } catch (err2) {
-      logger.error(`Fallback notif grup juga gagal: ${err2.message}`);
-      return null;
-    }
-  }
-}
 let ADMIN_USERNAME = '@ARI_VPN_STORE';
 const adminIds = ADMIN;
 logger.info('Bot initialized');
@@ -437,7 +405,7 @@ ID: <code>${userId}</code>
 Saldo: <code>Rp ${saldo}</code>
 Status: <code>${statusReseller}</code>
 
-📊 <b>Statistik Anda</b>
+<blockquote>📊 <b>Statistik Anda</b>
 • Hari Ini    : ${userToday} akun
 • Minggu Ini  : ${userWeek} akun
 • Bulan Ini   : ${userMonth} akun
@@ -446,7 +414,7 @@ Status: <code>${statusReseller}</code>
 • Hari Ini    : ${globalToday} akun
 • Minggu Ini  : ${globalWeek} akun
 • Bulan Ini   : ${globalMonth} akun
-
+</blockquote>
 
 ⚙️ <b>COMMAND</b>
 • 🏠 Menu Utama   : /start
@@ -1630,18 +1598,18 @@ bot.action('del_vless', async (ctx) => {
   await startSelectServer(ctx, 'del', 'vless');
 });
 
-bot.action('del_trojan', async (ctx) => {
-  if (!ctx || !ctx.match) {
-    return ctx.reply('❌ *GAGAL!* Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi nanti.', { parse_mode: 'Markdown' });
-  }
-  await startSelectServer(ctx, 'del', 'trojan');
-});
-
 bot.action('del_zivudp', async (ctx) => {
   if (!ctx || !ctx.match) {
     return ctx.reply('❌ *GAGAL!* Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi nanti.', { parse_mode: 'Markdown' });
   }
   await startSelectServer(ctx, 'del', 'zivudp');
+});
+
+bot.action('del_trojan', async (ctx) => {
+  if (!ctx || !ctx.match) {
+    return ctx.reply('❌ *GAGAL!* Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi nanti.', { parse_mode: 'Markdown' });
+  }
+  await startSelectServer(ctx, 'del', 'trojan');
 });
 //DELETE BREAK
 
@@ -1933,7 +1901,66 @@ bot.action(/navigate_(\w+)_(\w+)_(\d+)/, async (ctx) => {
   await startSelectServer(ctx, action, type, parseInt(page, 10));
 });
 
-bot.action(/(create)_username_(vmess|vless|trojan|shadowsocks|ssh|zivudp)_(.+)/, async (ctx) => {
+bot.action(/(create)_username_(zivudp)_(.+)/, async (ctx) => {
+  const action = ctx.match[1];
+  const type = ctx.match[2];
+  const serverId = ctx.match[3];
+  userState[ctx.chat.id] = { step: `password_${action}_${type}`, serverId, type, action, username: `zi${Date.now()}` };
+
+  db.get('SELECT batas_create_akun, total_create_akun FROM Server WHERE id = ?', [serverId], async (err, server) => {
+    if (err) return ctx.reply('❌ *Terjadi kesalahan saat mengambil detail server.*', { parse_mode: 'Markdown' });
+    if (!server) return ctx.reply('❌ *Server tidak ditemukan.*', { parse_mode: 'Markdown' });
+    if (server.total_create_akun >= server.batas_create_akun) return ctx.reply('❌ *Server penuh. Tidak dapat membuat akun baru di server ini.*', { parse_mode: 'Markdown' });
+    await ctx.reply('🔑 *Masukkan password akun ZIV UDP:*', { parse_mode: 'Markdown' });
+  });
+});
+
+bot.action(/(renew)_username_(zivudp)_(.+)/, async (ctx) => {
+  const action = ctx.match[1];
+  const type = ctx.match[2];
+  const serverId = ctx.match[3];
+  userState[ctx.chat.id] = { step: `password_${action}_${type}`, serverId, type, action, username: `zi${Date.now()}` };
+  await ctx.reply('🔑 *Masukkan password akun ZIV UDP yang akan di-renew:*', { parse_mode: 'Markdown' });
+});
+
+bot.action(/(trial)_username_(zivudp)_(.+)/, async (ctx) => {
+  try {
+    if (ctx.answerCbQuery) await ctx.answerCbQuery();
+    const [action, type, serverId] = [ctx.match[1], ctx.match[2], ctx.match[3]];
+    const idUser = ctx.from.id.toString().trim();
+    const resselDbPath = './ressel.db';
+    let isRessel = false;
+    try {
+      const data = fs.readFileSync(resselDbPath, 'utf8');
+      const resselList = data.split('\n').map(line => line.trim()).filter(Boolean);
+      isRessel = resselList.includes(idUser);
+    } catch (err) {
+      return ctx.reply('❌ *Terjadi kesalahan saat membaca data reseller.*', { parse_mode: 'Markdown' });
+    }
+    if (!isRessel) {
+      const sudahPakai = await checkTrialAccess(ctx.from.id);
+      if (sudahPakai) return ctx.reply('❌ *Anda sudah menggunakan fitur trial hari ini. Silakan coba lagi besok.*', { parse_mode: 'Markdown' });
+      await saveTrialAccess(ctx.from.id);
+    }
+    const username = `zi${Date.now()}`;
+    const password = 'none';
+    const exp = '1';
+    const iplimit = '1';
+    const msg = await trialzivudp(username, password, exp, iplimit, serverId);
+    await ctx.reply(msg, { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error('❌ Error handler trial zivudp:', err);
+    await ctx.reply('❌ Terjadi kesalahan saat membuat trial ZIV UDP. Coba lagi nanti.');
+  }
+});
+
+bot.action(/(del)_username_(zivudp)_(.+)/, async (ctx) => {
+  const [action, type, serverId] = [ctx.match[1], ctx.match[2], ctx.match[3]];
+  userState[ctx.chat.id] = { step: 'zivudp_delete_password', serverId, type, action };
+  await ctx.reply('🔑 *Masukkan password akun ZIV UDP yang ingin dihapus:*', { parse_mode: 'Markdown' });
+});
+
+bot.action(/(create)_username_(vmess|vless|trojan|shadowsocks|ssh)_(.+)/, async (ctx) => {
   const action = ctx.match[1];
   const type = ctx.match[2];
   const serverId = ctx.match[3];
@@ -1960,7 +1987,7 @@ bot.action(/(create)_username_(vmess|vless|trojan|shadowsocks|ssh|zivudp)_(.+)/,
   });
 }); 
 
-bot.action(/(renew)_username_(vmess|vless|trojan|shadowsocks|ssh|zivudp)_(.+)/, async (ctx) => {
+bot.action(/(renew)_username_(vmess|vless|trojan|shadowsocks|ssh)_(.+)/, async (ctx) => {
   const action = ctx.match[1];
   const type = ctx.match[2];
   const serverId = ctx.match[3];
@@ -1980,32 +2007,8 @@ bot.action(/(renew)_username_(vmess|vless|trojan|shadowsocks|ssh|zivudp)_(.+)/, 
   });
 }); 
 
-bot.action(/(del)_username_(vmess|vless|trojan|shadowsocks|ssh|zivudp)_(.+)/, async (ctx) => {
-  const action = ctx.match[1];
-  const type = ctx.match[2];
-  const serverId = ctx.match[3];
-  userState[ctx.chat.id] = { step: `username_${action}_${type}`, serverId, type, action };
-
-  db.get('SELECT batas_create_akun, total_create_akun FROM Server WHERE id = ?', [serverId], async (err, server) => {
-    if (err) {
-      logger.error('⚠️ Error fetching server details:', err.message);
-      return ctx.reply('❌ *Terjadi kesalahan saat mengambil detail server.*', { parse_mode: 'Markdown' });
-    }
-
-    if (!server) {
-      return ctx.reply('❌ *Server tidak ditemukan.*', { parse_mode: 'Markdown' });
-    }
-
-    if (type === 'zivudp') {
-      await ctx.reply('🔑 *Masukkan password akun ZIV UDP:*', { parse_mode: 'Markdown' });
-    } else {
-      await ctx.reply('👤 *Masukkan username:*', { parse_mode: 'Markdown' });
-    }
-  });
-});
-
 // === HANDLER TRIAL ===
-bot.action(/(trial)_username_(vmess|vless|trojan|shadowsocks|ssh|zivudp)_(.+)/, async (ctx) => {
+bot.action(/(trial)_username_(vmess|vless|trojan|shadowsocks|ssh)_(.+)/, async (ctx) => {
   try {
     if (ctx.answerCbQuery) await ctx.answerCbQuery();
 
@@ -2046,7 +2049,7 @@ const iplimit = '1';
 userState[ctx.chat.id] = { username, password, type, serverId, action, trial: true };
 
 await ctx.reply(
-  `⚙️ Membuat *TRIAL ${type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase()}* untuk server *${serverId}*...`,
+  `⚙️ Membuat *TRIAL ${type.toUpperCase()}* untuk server *${serverId}*...`,
   { parse_mode: 'Markdown' }
 );
 
@@ -2054,18 +2057,10 @@ logger.info(`✅ Trial ${type} dibuat oleh ${ctx.from.id}`);
 const maskedUsername = username.length > 1 
   ? `${username.slice(0, 1)}${'x'.repeat(username.length - 1)}` 
   : username; // Kalau kurang dari 3 char, tampilkan tanpa masking
-await safeGroupSend(
-  `⌛ <b>Trial Account Created</b>
-━━━━━━━━━━━━━━━━━━━━
-👤 <b>User:</b> ${ctx.from.first_name} (${ctx.from.id})
-🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase()}
-📛 <b>${type === 'zivudp' ? 'Password' : 'Username'}:</b> ${maskedUsername}
-📆 <b>Expired:</b> ${exp1 || '-'}
-💾 <b>Quota:</b> ${quota1 || '-'}
-🌐 <b>Server ID:</b> ${serverId}
-━━━━━━━━━━━━━━━━━━━━`,
-  { parse_mode: 'HTML' }
-       );
+await bot.telegram.sendMessage(
+  GROUP_ID,
+  `⌛ Trial Account Created\n━━━━━━━━━━━━━━━━━━━━\n👤 User: ${ctx.from.first_name} (${ctx.from.id})\n🧾 Type: ${type.toUpperCase()}\n📛 Username: ${maskedUsername}\n📆 Expired: ${exp1 || '-'}\n💾 Quota: ${quota1 || '-'}\n🌐 Server ID: ${serverId}\n━━━━━━━━━━━━━━━━━━━━`,
+  );
 
     const trialFunctions = {
       ssh: trialssh,
@@ -2079,7 +2074,7 @@ await safeGroupSend(
     if (!func) throw new Error(`Fungsi trial untuk tipe ${type} tidak ditemukan`);
 
     const msg = await func(username, password, exp, iplimit, serverId);
-    await safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
+    await ctx.reply(msg, { parse_mode: 'Markdown' });
 
   } catch (err) {
     console.error('❌ Error handler trial:', err);
@@ -2160,7 +2155,25 @@ bot.on('text', async (ctx) => {
     });
   }
 //
-    if (state.step?.startsWith('username_unlock_')) {
+    if (state.step === 'zivudp_delete_password') {
+    const accountPassword = text;
+    if (!accountPassword) {
+      return ctx.reply('❌ *Password akun ZIV UDP tidak valid.*', { parse_mode: 'Markdown' });
+    }
+    const { serverId } = state;
+    delete userState[ctx.chat.id];
+    try {
+      const msg = await delzivudp(accountPassword, serverId);
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
+      logger.info(`✅ Akun ZIV UDP berhasil dihapus oleh ${ctx.from.id}`);
+    } catch (err) {
+      logger.error('❌ Gagal hapus akun ZIV UDP:', err.message);
+      await ctx.reply('❌ *Terjadi kesalahan saat menghapus akun ZIV UDP.*', { parse_mode: 'Markdown' });
+    }
+    return;
+  }
+
+  if (state.step?.startsWith('username_unlock_')) {
     const username = text;
     // Validasi username (hanya huruf kecil dan angka, 3-20 karakter)
     if (!/^[a-z0-9]{3,20}$/.test(username)) {
@@ -2206,7 +2219,7 @@ bot.on('text', async (ctx) => {
         //await recordAccountTransaction(ctx.from.id, type);
       }
 
-      await safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
       logger.info(`✅ Akun ${type} berhasil unlock oleh ${ctx.from.id}`);
     } catch (err) {
       logger.error('❌ Gagal hapus akun:', err.message);
@@ -2260,7 +2273,7 @@ bot.on('text', async (ctx) => {
         //await recordAccountTransaction(ctx.from.id, type);
       }
 
-      await safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
       logger.info(`✅ Akun ${type} berhasil di kunci oleh ${ctx.from.id}`);
     } catch (err) {
       logger.error('❌ Gagal hapus akun:', err.message);
@@ -2444,7 +2457,7 @@ if (state.step?.startsWith('username_fix_')) {
         //await recordAccountTransaction(ctx.from.id, type);
       }
 
-      await safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
       logger.info(`✅ Akun ${type} berhasil dihapus oleh ${ctx.from.id}`);
     } catch (err) {
       logger.error('❌ Gagal hapus akun:', err.message);
@@ -2479,16 +2492,6 @@ if (state.step?.startsWith('username_fix_')) {
     } else if (action === 'renew') {
       state.step = `exp_${state.action}_${state.type}`;
       await ctx.reply('⏳ *Masukkan masa aktif (hari):*', { parse_mode: 'Markdown' });
-    } else if (action === 'del' && type === 'zivudp') {
-      try {
-        const msg = await delzivudp(state.username, 0, 0, state.serverId);
-        await safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
-        delete userState[ctx.chat.id];
-      } catch (err) {
-        logger.error('❌ Gagal hapus akun ZIV UDP:', err.message);
-        await ctx.reply('❌ *Terjadi kesalahan saat menghapus akun ZIV UDP.*', { parse_mode: 'Markdown' });
-      }
-      return;
     }
   } else if (state.step?.startsWith('password_')) {
     state.password = ctx.message.text.trim();
@@ -2583,7 +2586,7 @@ if (exp > 365) {
               msg = await createssh(username, password, exp, iplimit, serverId);
               await recordAccountTransaction(ctx.from.id, 'ssh');
             } else if (type === 'zivudp') {
-              msg = await createzivudp(username, exp, iplimit, serverId);
+              msg = await createzivudp(username, password, exp, iplimit, serverId);
               await recordAccountTransaction(ctx.from.id, 'zivudp');
             }
             logger.info(`Account created and transaction recorded for user ${ctx.from.id}, type: ${type}`);
@@ -2592,18 +2595,10 @@ const maskedUsername = username.length > 1
   : username; // Kalau kurang dari 1 char, tampilkan tanpa masking
 
 // 🔔 Kirim notifikasi ke grup
-await safeGroupSend(
-  `📢 <b>Account Created</b>
-━━━━━━━━━━━━━━━━━━━━
-👤 <b>User:</b> ${ctx.from.first_name} (${ctx.from.id})
-🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase()}
-📛 <b>${type === 'zivudp' ? 'Password' : 'Username'}:</b> ${maskedUsername}
-📆 <b>Expired:</b> ${exp || '0'}
-💾 <b>Quota:</b> ${quota || '0'}
-🌐 <b>Server ID:</b> ${serverId}
-━━━━━━━━━━━━━━━━━━━━`,
-  { parse_mode: 'HTML' }
-   );
+await bot.telegram.sendMessage(
+  GROUP_ID,
+  `📢 Account Created\n━━━━━━━━━━━━━━━━━━━━\n👤 User: ${ctx.from.first_name} (${ctx.from.id})\n🧾 Type: ${type.toUpperCase()}\n📛 Username: ${maskedUsername}\n📆 Expired: ${exp || '0'}\n💾 Quota: ${quota || '0'}\n🌐 Server ID: ${serverId}\n━━━━━━━━━━━━━━━━━━━━`,
+  );
           } else if (action === 'renew') {
             if (type === 'vmess') {
               msg = await renewvmess(username, exp, quota, iplimit, serverId);
@@ -2621,7 +2616,7 @@ await safeGroupSend(
               msg = await renewssh(username, exp, iplimit, serverId);
               await recordAccountTransaction(ctx.from.id, 'ssh');
             } else if (type === 'zivudp') {
-              msg = await renewzivudp(username, exp, iplimit, serverId);
+              msg = await renewzivudp(username, password, exp, iplimit, serverId);
               await recordAccountTransaction(ctx.from.id, 'zivudp');
             }
             logger.info(`Account renewed and transaction recorded for user ${ctx.from.id}, type: ${type}`);
@@ -2629,24 +2624,16 @@ const maskedUsername = username.length > 1
   ? `${username.slice(0, 1)}${'x'.repeat(username.length - 1)}` 
   : username; // Kalau kurang dari 3 char, tampilkan tanpa masking
 // 🔔 Kirim notifikasi ke grup
-await safeGroupSend(
-  `♻️ <b>Account Renewed</b>
-━━━━━━━━━━━━━━━━━━━━
-👤 <b>User:</b> ${ctx.from.first_name} (${ctx.from.id})
-🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase()}
-📛 <b>${type === 'zivudp' ? 'Password' : 'Username'}:</b> ${maskedUsername}
-📆 <b>New Expiry:</b> ${exp || '0'}
-💾 <b>Quota:</b> ${quota || '0'}
-🌐 <b>Server ID:</b> ${serverId}
-━━━━━━━━━━━━━━━━━━━━`,
-  { parse_mode: 'HTML' }
-       );
+await bot.telegram.sendMessage(
+  GROUP_ID,
+  `♻️ Account Renewed\n━━━━━━━━━━━━━━━━━━━━\n👤 User: ${ctx.from.first_name} (${ctx.from.id})\n🧾 Type: ${type.toUpperCase()}\n📛 Username: ${maskedUsername}\n📆 New Expiry: ${exp || '0'}\n💾 Quota: ${quota || '0'}\n🌐 Server ID: ${serverId}\n━━━━━━━━━━━━━━━━━━━━`,
+  );
 }
 //SALDO DATABES
 // setelah bikin akun (create/renew), kita cek hasilnya
 if (msg.includes('❌')) {
   logger.error(`🔄 Rollback saldo user ${ctx.from.id}, type: ${type}, server: ${serverId}, respon: ${msg}`);
-  return safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
+  return ctx.reply(msg, { parse_mode: 'Markdown' });
 }
 
 // kalau sampai sini artinya tidak ada ❌, transaksi sukses
@@ -2659,7 +2646,7 @@ db.run('UPDATE users SET saldo = saldo - ? WHERE user_id = ?', [totalHarga, ctx.
   }
 });
 
-await safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
+await ctx.reply(msg, { parse_mode: 'Markdown' });
 delete userState[ctx.chat.id];
 //SALDO DATABES
           });
@@ -4544,12 +4531,15 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
         const userDisplay = userInfo.username
           ? `${username} (${deposit ? deposit.userId : (ctx ? ctx.from.id : '')})`
           : `${username}`;
-        await safeGroupSend(
-          `✅ <b>Top Up Berhasil</b>
+        await bot.telegram.sendMessage(
+          GROUP_ID,
+          `<blockquote>
+✅ <b>Top Up Berhasil</b>
 👤 User: ${userDisplay}
 💰 Nominal: <b>Rp ${deposit.originalAmount}</b>
 🏦 Saldo Sekarang: <b>Rp ${user.saldo}</b>
-🕒 Waktu: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`,
+🕒 Waktu: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}
+</blockquote>`,
           { parse_mode: 'HTML' }
         );
       } catch (e) { logger.error('Gagal kirim notif top up ke grup:', e.message); }

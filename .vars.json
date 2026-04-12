@@ -1,0 +1,16 @@
+{
+  "BOT_TOKEN": "-",
+  "USER_ID": "-",
+  "NAMA_STORE": "-",
+  "GROUP_ID": "-",
+  "PORT": "6969",
+  "PAYMENT": "-",
+  "DATA_QRIS": "-",
+  "MERCHANT_ID": "-",
+  "GOPAY_KEY": "-",
+  "AUTH_PAYMET_GETWAY": "-",
+  "DATA_QRIS_ORKUT": "-",
+  "AUTH_USERNAME_ORKUT": "-",
+  "AUTH_TOKEN_ORKUT": "-",
+  "WEB_MUTILASI_ORKUT": "https://app.orderkuota.com/api/v2/qris/mutasi/-"
+}

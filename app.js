@@ -228,6 +228,10 @@ db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
   }
 });
 
+db.run(`ALTER TABLE pending_deposits ADD COLUMN purpose TEXT DEFAULT 'deposit'`, () => {});
+db.run(`ALTER TABLE pending_deposits ADD COLUMN payload TEXT`, () => {});
+db.run(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`, () => {});
+
 db.run(`CREATE TABLE IF NOT EXISTS Server (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   domain TEXT,
@@ -1802,6 +1806,37 @@ bot.action('renew_zivudp', async (ctx) => {
   await startSelectServer(ctx, 'renew', 'zivudp');
 });
 
+bot.action('pay_balance', async (ctx) => {
+  await ctx.answerCbQuery();
+  const state = userState[ctx.chat.id];
+  if (!state || !state.step || !state.step.startsWith('payment_method_')) {
+    return safeReplyMessage(ctx, '❌ Tidak ada pesanan aktif.');
+  }
+
+  db.get('SELECT saldo FROM users WHERE user_id = ?', [ctx.from.id], async (err, user) => {
+    if (err || !user) return safeReplyMessage(ctx, '❌ Gagal mengambil saldo pengguna.');
+    if (Number(user.saldo || 0) < Number(state.totalHarga || 0)) {
+      return safeReplyMessage(ctx, '❌ Saldo Anda tidak mencukupi untuk melakukan transaksi ini.');
+    }
+
+    delete userState[ctx.chat.id];
+    await safeReplyMessage(ctx, '⏳ Pembayaran saldo diterima. Sedang memproses pesanan Anda...');
+    const result = await executeServiceOrder({ ...state, userId: ctx.from.id }, { chargeBalance: true, paymentSource: 'saldo' });
+    if (!result.success) {
+      await safeReplyMessage(ctx, result.msg);
+    }
+  });
+});
+
+bot.action('pay_qris', async (ctx) => {
+  await ctx.answerCbQuery();
+  const state = userState[ctx.chat.id];
+  if (!state || !state.step || !state.step.startsWith('payment_method_')) {
+    return safeReplyMessage(ctx, '❌ Tidak ada pesanan aktif.');
+  }
+  await createServiceOrderQRIS(ctx, { ...state, userId: ctx.from.id });
+});
+
 async function startSelectServer(ctx, action, type, page = 0) {
   try {
     const isR = await isUserReseller(ctx.from.id);
@@ -2556,122 +2591,24 @@ if (exp > 365) {
         }
 
         const harga = server.harga;
-        const totalHarga = harga * state.exp; 
-        db.get('SELECT saldo FROM users WHERE user_id = ?', [ctx.from.id], async (err, user) => {
-          if (err) {
-            logger.error('⚠️ Kesalahan saat mengambil saldo pengguna:', err.message);
-            return ctx.reply('❌ *Terjadi kesalahan saat mengambil saldo pengguna.*', { parse_mode: 'Markdown' });
-          }
+        const totalHarga = harga * state.exp;
 
-          if (!user) {
-            return ctx.reply('❌ *Pengguna tidak ditemukan.*', { parse_mode: 'Markdown' });
-          }
+        const order = {
+          action,
+          type,
+          serverId,
+          username,
+          password,
+          exp,
+          quota,
+          iplimit,
+          totalHarga
+        };
 
-          const saldo = user.saldo;
-          if (saldo < totalHarga) {
-            return ctx.reply('❌ *Saldo Anda tidak mencukupi untuk melakukan transaksi ini.*', { parse_mode: 'Markdown' });
-          }
-          if (action === 'create') {
-            if (type === 'vmess') {
-              msg = await createvmess(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'vmess');
-            } else if (type === 'vless') {
-              msg = await createvless(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'vless');
-            } else if (type === 'trojan') {
-              msg = await createtrojan(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'trojan');
-            } else if (type === 'shadowsocks') {
-              msg = await createshadowsocks(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'shadowsocks');
-            } else if (type === 'ssh') {
-              msg = await createssh(username, password, exp, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'ssh');
-            } else if (type === 'zivudp') {
-              msg = await createzivudp(username, password, exp, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'zivudp');
-            }
-            logger.info(`Account created and transaction recorded for user ${ctx.from.id}, type: ${type}`);
-const maskedUsername = username.length > 1 
-  ? `${username.slice(0, 1)}${'x'.repeat(username.length - 1)}` 
-  : username; // Kalau kurang dari 1 char, tampilkan tanpa masking
-
-// 🔔 Kirim notifikasi ke grup
-await safeGroupSend(
-  `📢 <b>Account Created</b>
-━━━━━━━━━━━━━━━━━━━━
-👤 <b>User:</b> ${ctx.from.first_name} (${ctx.from.id})
-🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase()}
-📛 <b>${type === 'zivudp' ? 'Username' : 'Username'}:</b> ${maskedUsername}
-📆 <b>Expired:</b> ${exp || '0'}
-💾 <b>Quota:</b> ${quota || '0'}
-🌐 <b>Server ID:</b> ${serverId}
-━━━━━━━━━━━━━━━━━━━━`,
-  { parse_mode: 'HTML' }
-   );
-          } else if (action === 'renew') {
-            if (type === 'vmess') {
-              msg = await renewvmess(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'vmess');
-            } else if (type === 'vless') {
-              msg = await renewvless(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'vless');
-            } else if (type === 'trojan') {
-              msg = await renewtrojan(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'trojan');
-            } else if (type === 'shadowsocks') {
-              msg = await renewshadowsocks(username, exp, quota, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'shadowsocks');
-            } else if (type === 'ssh') {
-              msg = await renewssh(username, exp, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'ssh');
-            } else if (type === 'zivudp') {
-              msg = await renewzivudp(username, exp, iplimit, serverId);
-              await recordAccountTransaction(ctx.from.id, 'zivudp');
-            }
-            logger.info(`Account renewed and transaction recorded for user ${ctx.from.id}, type: ${type}`);
-const maskedUsername = username.length > 1 
-  ? `${username.slice(0, 1)}${'x'.repeat(username.length - 1)}` 
-  : username; // Kalau kurang dari 3 char, tampilkan tanpa masking
-// 🔔 Kirim notifikasi ke grup
-await safeGroupSend(
-  `♻️ <b>Account Renewed</b>
-━━━━━━━━━━━━━━━━━━━━
-👤 <b>User:</b> ${ctx.from.first_name} (${ctx.from.id})
-🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase()}
-📛 <b>${type === 'zivudp' ? 'Username' : 'Username'}:</b> ${maskedUsername}
-📆 <b>New Expiry:</b> ${exp || '0'}
-💾 <b>Quota:</b> ${quota || '0'}
-🌐 <b>Server ID:</b> ${serverId}
-━━━━━━━━━━━━━━━━━━━━`,
-  { parse_mode: 'HTML' }
-       );
-}
-//SALDO DATABES
-// setelah bikin akun (create/renew), kita cek hasilnya
-if (msg.includes('❌')) {
-  logger.error(`🔄 Rollback saldo user ${ctx.from.id}, type: ${type}, server: ${serverId}, respon: ${msg}`);
-  return safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
-}
-
-// kalau sampai sini artinya tidak ada ❌, transaksi sukses
-logger.info(`✅ Transaksi sukses untuk user ${ctx.from.id}, type: ${type}, server: ${serverId}`);
-
-db.run('UPDATE users SET saldo = saldo - ? WHERE user_id = ?', [totalHarga, ctx.from.id], (err) => {
-  if (err) {
-    logger.error('⚠️ Kesalahan saat mengurangi saldo pengguna:', err.message);
-    return ctx.reply('❌ *Terjadi kesalahan saat mengurangi saldo pengguna.*', { parse_mode: 'Markdown' });
-  }
-});
-
-await safeReplyMessage(ctx, msg, { parse_mode: 'Markdown' });
-delete userState[ctx.chat.id];
-//SALDO DATABES
-          });
-        });
+        await sendPaymentMethodPrompt(ctx, order);
       });
-    } 
-  else if (state.step === 'addserver') {
+    });
+  } else if (state.step === 'addserver') {
     const domain = ctx.message.text.trim();
     if (!domain) {
       await ctx.reply('⚠️ *Domain tidak boleh kosong.* Silakan masukkan domain server yang valid.', { parse_mode: 'Markdown' });
@@ -4062,7 +3999,10 @@ db.all('SELECT * FROM pending_deposits WHERE status = "pending"', [], (err, rows
       userId: row.user_id,
       timestamp: row.timestamp,
       status: row.status,
-      qrMessageId: row.qr_message_id
+      qrMessageId: row.qr_message_id,
+      purpose: row.purpose || 'deposit',
+      payload: row.payload || null,
+      transactionId: row.transaction_id || null
     };
   });
   logger.info('Pending deposit loaded:', Object.keys(global.pendingDeposits).length);
@@ -4086,6 +4026,228 @@ const execP = (cmd, opts = {}) =>
       resolve(stdout);
     });
   });
+
+async function safeSendToUser(userId, text, extra = {}) {
+  try {
+    return await bot.telegram.sendMessage(userId, text, extra);
+  } catch (error) {
+    logger.error(`SendMessage gagal ke ${userId}, fallback ke plain text: ${error.message}`);
+    const fallback = { ...extra };
+    delete fallback.parse_mode;
+    try {
+      return await bot.telegram.sendMessage(userId, text, fallback);
+    } catch (err2) {
+      logger.error(`Fallback sendMessage juga gagal ke ${userId}: ${err2.message}`);
+      return null;
+    }
+  }
+}
+
+function formatOrderSummary(order) {
+  const actionLabel = order.action === 'create' ? 'Buat Akun' : 'Perpanjang Akun';
+  const typeLabel = order.type === 'zivudp' ? 'ZIV UDP' : String(order.type || '').toUpperCase();
+  const usernameLine = order.username ? `👤 Username: ${order.username}\n` : '';
+  const expLine = order.exp ? `📅 Masa aktif: ${order.exp} hari\n` : '';
+  return `🧾 Detail Pesanan\n\n` +
+    `🛠 Layanan: ${actionLabel} ${typeLabel}\n` +
+    usernameLine +
+    expLine +
+    `🌐 Server ID: ${order.serverId}\n` +
+    `💰 Total: Rp ${Number(order.totalHarga || 0).toLocaleString('id-ID')}`;
+}
+
+async function sendPaymentMethodPrompt(ctx, order) {
+  userState[ctx.chat.id] = { ...order, step: `payment_method_${order.action}_${order.type}` };
+  return safeReplyMessage(ctx, formatOrderSummary(order) + `\n\nPilih metode pembayaran:`, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '💳 Bayar Saldo', callback_data: 'pay_balance' }],
+        [{ text: '📷 Bayar QRIS', callback_data: 'pay_qris' }]
+      ]
+    }
+  });
+}
+
+async function deductUserBalance(userId, amount) {
+  return new Promise((resolve, reject) => {
+    db.run('UPDATE users SET saldo = saldo - ? WHERE user_id = ?', [amount, userId], function(err) {
+      if (err) return reject(err);
+      resolve(true);
+    });
+  });
+}
+
+async function createServiceOrderQRIS(ctx, order) {
+  const currentTime = Date.now();
+  if (currentTime - lastRequestTime < requestInterval) {
+    await safeReplyMessage(ctx, '⚠️ Terlalu banyak request, tunggu dulu ya.');
+    return;
+  }
+  lastRequestTime = currentTime;
+
+  const userId = ctx.from.id;
+  const uniqueCode = `order-${userId}-${Date.now()}`;
+  let finalAmount = Number(order.totalHarga);
+  let adminFee = 0;
+
+  try {
+    let transactionId = null;
+    let qrMessage = null;
+
+    if (vars.PAYMENT === 'GOPAY') {
+      const res = await axios.post(
+        'https://api-gopay.sawargipay.cloud/qris/generate',
+        { amount: finalAmount },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GOPAY_KEY}`
+          },
+          timeout: 15000
+        }
+      );
+      if (!res.data?.success) throw new Error('Gagal create QRIS GOPAY');
+      const data = res.data.data;
+      transactionId = data.transaction_id;
+      const safeQrUrl = encodeURI(String(data.qr_url || '').trim());
+      const caption = formatOrderSummary(order) + `\n\n💰 Total bayar: Rp ${finalAmount.toLocaleString('id-ID')}\n⏱️ Expired: 10 menit\n⚠️ Transfer harus sama persis!\n\n🔗 Klik QRIS: ${safeQrUrl}`;
+      qrMessage = await safeReplyMessage(ctx, caption, {
+        reply_markup: { inline_keyboard: [[{ text: '❌ Batal', callback_data: `batal_topup_${uniqueCode}` }]] }
+      });
+    } else if (vars.PAYMENT === 'ORKUT') {
+      const res = await axios.get('https://orkut.rajaserver.web.id/api/qris', {
+        params: { qris_string: vars.DATA_QRIS_ORKUT, amount: Number(order.totalHarga), format: 'json' },
+        timeout: 15000
+      });
+      const data = res.data;
+      if (!data || !data.success) throw new Error('Gagal create QRIS ORKUT');
+      finalAmount = Number(data.amount);
+      adminFee = Number(data.random_add);
+      transactionId = data.reference;
+      const base64Data = String(data.image_data || '').split(',')[1];
+      if (!base64Data) throw new Error('QRIS image invalid');
+      const imageBuffer = Buffer.from(base64Data, 'base64');
+      const caption = formatOrderSummary(order) + `\n\n💰 Total bayar: Rp ${finalAmount.toLocaleString('id-ID')}\n` +
+        (adminFee > 0 ? `🧾 Biaya admin: Rp ${adminFee.toLocaleString('id-ID')}\n` : '') +
+        `⏱️ Expired: 10 menit\n⚠️ Transfer harus sama persis!`;
+      qrMessage = await ctx.replyWithPhoto({ source: imageBuffer }, {
+        caption,
+        reply_markup: { inline_keyboard: [[{ text: '❌ Batal', callback_data: `batal_topup_${uniqueCode}` }]] }
+      });
+    } else {
+      throw new Error('PAYMENT tidak valid');
+    }
+
+    if (!global.pendingDeposits) global.pendingDeposits = {};
+    global.pendingDeposits[uniqueCode] = {
+      amount: finalAmount,
+      originalAmount: Number(order.totalHarga),
+      userId,
+      timestamp: Date.now(),
+      status: 'pending',
+      qrMessageId: qrMessage?.message_id,
+      transactionId,
+      purpose: 'service_order',
+      payload: JSON.stringify(order)
+    };
+
+    db.run(
+      `INSERT INTO pending_deposits
+      (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id, purpose, payload, transaction_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        uniqueCode,
+        userId,
+        finalAmount,
+        Number(order.totalHarga),
+        Date.now(),
+        'pending',
+        qrMessage?.message_id,
+        'service_order',
+        JSON.stringify(order),
+        transactionId
+      ]
+    );
+
+    delete userState[ctx.chat.id];
+    try { await ctx.deleteMessage(); } catch {}
+  } catch (error) {
+    logger.error(`QRIS order error: ${error.message}`);
+    await safeReplyMessage(ctx, `❌ Gagal membuat QRIS order.\n⚠️ Detail: ${error.message}`);
+  }
+}
+
+async function executeServiceOrder(order, opts = {}) {
+  const { chargeBalance = false, paymentSource = 'saldo' } = opts;
+  const userId = order.userId;
+  const action = order.action;
+  const type = order.type;
+  const username = order.username;
+  const password = order.password;
+  const exp = order.exp;
+  const quota = order.quota;
+  const iplimit = order.iplimit;
+  const serverId = order.serverId;
+  const totalHarga = Number(order.totalHarga || 0);
+  let msg = '';
+
+  try {
+    if (action === 'create') {
+      if (type === 'vmess') msg = await createvmess(username, exp, quota, iplimit, serverId);
+      else if (type === 'vless') msg = await createvless(username, exp, quota, iplimit, serverId);
+      else if (type === 'trojan') msg = await createtrojan(username, exp, quota, iplimit, serverId);
+      else if (type === 'shadowsocks') msg = await createshadowsocks(username, exp, quota, iplimit, serverId);
+      else if (type === 'ssh') msg = await createssh(username, password, exp, iplimit, serverId);
+      else if (type === 'zivudp') msg = await createzivudp(username, password, exp, iplimit, serverId);
+    } else if (action === 'renew') {
+      if (type === 'vmess') msg = await renewvmess(username, exp, quota, iplimit, serverId);
+      else if (type === 'vless') msg = await renewvless(username, exp, quota, iplimit, serverId);
+      else if (type === 'trojan') msg = await renewtrojan(username, exp, quota, iplimit, serverId);
+      else if (type === 'shadowsocks') msg = await renewshadowsocks(username, exp, quota, iplimit, serverId);
+      else if (type === 'ssh') msg = await renewssh(username, exp, iplimit, serverId);
+      else if (type === 'zivudp') msg = await renewzivudp(username, exp, iplimit, serverId);
+    }
+
+    if (!msg || msg.includes('❌')) {
+      if (paymentSource === 'qris' && totalHarga > 0) {
+        await updateUserBalance(userId, totalHarga);
+        await safeSendToUser(userId, `⚠️ Pembayaran QRIS berhasil, tetapi proses ${action} ${type} gagal. Dana Rp ${totalHarga.toLocaleString('id-ID')} sudah dimasukkan ke saldo Anda.\n\nDetail error:\n${msg || 'Unknown error'}`);
+      }
+      return { success: false, msg: msg || '❌ Transaksi gagal.' };
+    }
+
+    if (chargeBalance && totalHarga > 0) {
+      await deductUserBalance(userId, totalHarga);
+    }
+
+    await recordAccountTransaction(userId, type);
+
+    const userInfo = await bot.telegram.getChat(userId).catch(() => ({ first_name: String(userId) }));
+    const maskedUsername = username && username.length > 1 ? `${username.slice(0, 1)}${'x'.repeat(username.length - 1)}` : (username || '-');
+    await safeGroupSend(
+      `${action === 'create' ? '📢' : '♻️'} <b>${action === 'create' ? 'Account Created' : 'Account Renewed'}</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `👤 <b>User:</b> ${userInfo.first_name || userId} (${userId})\n` +
+      `🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : String(type).toUpperCase()}\n` +
+      `📛 <b>Username:</b> ${maskedUsername}\n` +
+      `📆 <b>Expired:</b> ${exp || '0'}\n` +
+      `🌐 <b>Server ID:</b> ${serverId}\n` +
+      `💳 <b>Metode:</b> ${paymentSource.toUpperCase()}\n` +
+      `━━━━━━━━━━━━━━━━━━━━`,
+      { parse_mode: 'HTML' }
+    );
+
+    await safeSendToUser(userId, msg, { parse_mode: 'Markdown' });
+    return { success: true, msg };
+  } catch (error) {
+    logger.error(`executeServiceOrder error: ${error.message}`);
+    if (paymentSource === 'qris' && totalHarga > 0) {
+      await updateUserBalance(userId, totalHarga).catch(() => {});
+      await safeSendToUser(userId, `⚠️ Pembayaran QRIS berhasil, tetapi proses order gagal total. Dana Rp ${totalHarga.toLocaleString('id-ID')} dimasukkan ke saldo Anda.`);
+    }
+    return { success: false, msg: `❌ ${error.message}` };
+  }
+}
 
 // ============================ 
 // PROCESS DEPOSIT (FINAL UPDATE)
@@ -4234,7 +4396,9 @@ async function processDeposit(ctx, amount) {
       timestamp: Date.now(),
       status: 'pending',
       qrMessageId: qrMessage?.message_id,
-      transactionId
+      transactionId,
+      purpose: 'deposit',
+      payload: null
     };
 
     // ======================
@@ -4242,8 +4406,8 @@ async function processDeposit(ctx, amount) {
     // ======================
     db.run(
       `INSERT INTO pending_deposits 
-      (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id, purpose, payload, transaction_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         uniqueCode,
         userId,
@@ -4251,7 +4415,10 @@ async function processDeposit(ctx, amount) {
         Number(amount),
         Date.now(),
         'pending',
-        qrMessage?.message_id
+        qrMessage?.message_id,
+        'deposit',
+        null,
+        transactionId
       ]
     );
 
@@ -4492,6 +4659,31 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
             resolve(false);
             return;
           }
+          if ((deposit.purpose || 'deposit') === 'service_order') {
+            db.run(
+              'INSERT INTO transactions (user_id, amount, type, reference_id, timestamp) VALUES (?, ?, ?, ?, ?)',
+              [deposit.userId, deposit.originalAmount, 'service_order_qris', matchingTransaction.reference_id || uniqueCode, Date.now()],
+              async (err) => {
+                if (err) {
+                  db.run('ROLLBACK');
+                  logger.error('Error recording service order transaction:', err);
+                  reject(err);
+                  return;
+                }
+                db.run('COMMIT');
+                if (deposit.qrMessageId) {
+                  try { await bot.telegram.deleteMessage(deposit.userId, deposit.qrMessageId); } catch (e) {}
+                }
+                let order = null;
+                try { order = JSON.parse(deposit.payload || '{}'); } catch (e) {}
+                await safeSendToUser(deposit.userId, '✅ Pembayaran QRIS berhasil. Sedang memproses pesanan Anda...');
+                const result = await executeServiceOrder({ ...(order || {}), userId: deposit.userId, totalHarga: deposit.originalAmount }, { chargeBalance: false, paymentSource: 'qris' });
+                resolve(result.success);
+              }
+            );
+            return;
+          }
+
           // Update user balance
           db.run('UPDATE users SET saldo = saldo + ? WHERE user_id = ?', 
             [deposit.originalAmount, deposit.userId], 
@@ -4538,17 +4730,14 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
     if (notificationSent) {
       // Notifikasi ke grup untuk top up
       try {
-        // Pada notifikasi ke grup (top up dan pembelian/renew), ambil info user:
         let userInfo;
         try {
-          userInfo = await bot.telegram.getChat(deposit ? deposit.userId : (ctx ? ctx.from.id : ''));
+          userInfo = await bot.telegram.getChat(deposit.userId);
         } catch (e) {
           userInfo = {};
         }
-        const username = userInfo.username ? `@${userInfo.username}` : (userInfo.first_name || (deposit ? deposit.userId : (ctx ? ctx.from.id : '')));
-        const userDisplay = userInfo.username
-          ? `${username} (${deposit ? deposit.userId : (ctx ? ctx.from.id : '')})`
-          : `${username}`;
+        const username = userInfo.username ? `@${userInfo.username}` : (userInfo.first_name || deposit.userId);
+        const userDisplay = userInfo.username ? `${username} (${deposit.userId})` : `${username}`;
         await safeGroupSend(
           `✅ <b>Top Up Berhasil</b>
 👤 User: ${userDisplay}

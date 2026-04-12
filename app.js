@@ -4480,9 +4480,10 @@ async function checkQRISStatus() {
         if (status !== "settlement") continue;
 
         logger.info(`💰 PEMBAYARAN MASUK ${uniqueCode}`);
+        deposit.status = 'processing';
+        db.run('UPDATE pending_deposits SET status = ? WHERE unique_code = ?', ['processing', uniqueCode]);
         const success = await processMatchingPayment(deposit, data, uniqueCode);
-
-        if (success) {
+        if (!success) {
           delete global.pendingDeposits[uniqueCode];
           db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
         }
@@ -4528,10 +4529,12 @@ async function checkQRISStatus() {
         }
 
         logger.info(`[QRIS] MATCH ${uniqueCode}`);
+        deposit.status = 'processing';
+        db.run('UPDATE pending_deposits SET status = ? WHERE unique_code = ?', ['processing', uniqueCode]);
         const success = await processMatchingPayment(deposit, match, uniqueCode);
-
         if (success) {
           logger.info(`[QRIS] SUCCESS ${uniqueCode}`);
+        } else {
           delete global.pendingDeposits[uniqueCode];
           db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
         }
@@ -4638,31 +4641,37 @@ async function sendPaymentSuccessNotification(userId, deposit, currentBalance) {
 }
 
 async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) {
-  const transactionKey = `${matchingTransaction.reference_id || uniqueCode}_${matchingTransaction.amount}`;
-  // Use a database transaction to ensure atomicity
+  const referenceId = matchingTransaction.reference_id || matchingTransaction.reference || uniqueCode;
+  const paidAmount = Number(matchingTransaction.amount || matchingTransaction.kredit || deposit.amount || 0);
+  const transactionKey = `${referenceId}_${paidAmount}`;
+
   return new Promise((resolve, reject) => {
     db.serialize(() => {
       db.run('BEGIN TRANSACTION');
-      // First check if transaction was already processed
-      db.get('SELECT id FROM transactions WHERE reference_id = ? AND amount = ?', 
-        [matchingTransaction.reference_id || uniqueCode, matchingTransaction.amount], 
-        (err, row) => {
+      db.get(
+        'SELECT id, type FROM transactions WHERE reference_id = ? LIMIT 1',
+        [referenceId],
+        async (err, row) => {
           if (err) {
             db.run('ROLLBACK');
             logger.error('Error checking transaction:', err);
             reject(err);
             return;
           }
+
           if (row) {
             db.run('ROLLBACK');
-    logger.info(`Transaction ${transactionKey} already processed, skipping...`);
-            resolve(false);
+            logger.info(`Transaction ${transactionKey} already processed, skipping...`);
+            delete global.pendingDeposits[uniqueCode];
+            db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+            resolve(true);
             return;
           }
+
           if ((deposit.purpose || 'deposit') === 'service_order') {
             db.run(
               'INSERT INTO transactions (user_id, amount, type, reference_id, timestamp) VALUES (?, ?, ?, ?, ?)',
-              [deposit.userId, deposit.originalAmount, 'service_order_qris', matchingTransaction.reference_id || uniqueCode, Date.now()],
+              [deposit.userId, deposit.originalAmount, 'service_order_qris', referenceId, Date.now()],
               async (err) => {
                 if (err) {
                   db.run('ROLLBACK');
@@ -4670,23 +4679,37 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
                   reject(err);
                   return;
                 }
+
                 db.run('COMMIT');
                 if (deposit.qrMessageId) {
                   try { await bot.telegram.deleteMessage(deposit.userId, deposit.qrMessageId); } catch (e) {}
                 }
+
                 let order = null;
                 try { order = JSON.parse(deposit.payload || '{}'); } catch (e) {}
+
                 await safeSendToUser(deposit.userId, '✅ Pembayaran QRIS berhasil. Sedang memproses pesanan Anda...');
-                const result = await executeServiceOrder({ ...(order || {}), userId: deposit.userId, totalHarga: deposit.originalAmount }, { chargeBalance: false, paymentSource: 'qris' });
-                resolve(result.success);
+                const result = await executeServiceOrder(
+                  { ...(order || {}), userId: deposit.userId, totalHarga: deposit.originalAmount },
+                  { chargeBalance: false, paymentSource: 'qris' }
+                );
+
+                delete global.pendingDeposits[uniqueCode];
+                db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+
+                if (!result.success) {
+                  logger.warn(`Service order QRIS gagal diproses untuk ${uniqueCode}: ${result.msg}`);
+                }
+
+                resolve(true);
               }
             );
             return;
           }
 
-          // Update user balance
-          db.run('UPDATE users SET saldo = saldo + ? WHERE user_id = ?', 
-            [deposit.originalAmount, deposit.userId], 
+          db.run(
+            'UPDATE users SET saldo = saldo + ? WHERE user_id = ?',
+            [deposit.originalAmount, deposit.userId],
             function(err) {
               if (err) {
                 db.run('ROLLBACK');
@@ -4694,18 +4717,18 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
                 reject(err);
                 return;
               }
-    // Record the transaction
-      db.run(
+
+              db.run(
                 'INSERT INTO transactions (user_id, amount, type, reference_id, timestamp) VALUES (?, ?, ?, ?, ?)',
-                [deposit.userId, deposit.originalAmount, 'deposit', matchingTransaction.reference_id || uniqueCode, Date.now()],
-        (err) => {
+                [deposit.userId, deposit.originalAmount, 'deposit', referenceId, Date.now()],
+                (err) => {
                   if (err) {
                     db.run('ROLLBACK');
                     logger.error('Error recording transaction:', err);
                     reject(err);
                     return;
                   }
-                  // Get updated balance
+
                   db.get('SELECT saldo FROM users WHERE user_id = ?', [deposit.userId], async (err, user) => {
                     if (err) {
                       db.run('ROLLBACK');
@@ -4713,59 +4736,60 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
                       reject(err);
                       return;
                     }
-                    // Send notification using sendPaymentSuccessNotification
-    const notificationSent = await sendPaymentSuccessNotification(
-      deposit.userId,
-      deposit,
-                      user.saldo
-                    );
-                    // Delete QR code message after payment success
+
+                    const notificationSent = await sendPaymentSuccessNotification(deposit.userId, deposit, user.saldo);
+
                     if (deposit.qrMessageId) {
                       try {
                         await bot.telegram.deleteMessage(deposit.userId, deposit.qrMessageId);
                       } catch (e) {
-                        logger.error("Gagal menghapus pesan QR code:", e.message);
+                        logger.error('Gagal menghapus pesan QR code:', e.message);
                       }
                     }
-    if (notificationSent) {
-      // Notifikasi ke grup untuk top up
-      try {
-        let userInfo;
-        try {
-          userInfo = await bot.telegram.getChat(deposit.userId);
-        } catch (e) {
-          userInfo = {};
-        }
-        const username = userInfo.username ? `@${userInfo.username}` : (userInfo.first_name || deposit.userId);
-        const userDisplay = userInfo.username ? `${username} (${deposit.userId})` : `${username}`;
-        await safeGroupSend(
-          `✅ <b>Top Up Berhasil</b>
+
+                    if (notificationSent) {
+                      try {
+                        let userInfo;
+                        try {
+                          userInfo = await bot.telegram.getChat(deposit.userId);
+                        } catch (e) {
+                          userInfo = {};
+                        }
+                        const username = userInfo.username ? `@${userInfo.username}` : (userInfo.first_name || deposit.userId);
+                        const userDisplay = userInfo.username ? `${username} (${deposit.userId})` : `${username}`;
+                        await safeGroupSend(
+                          `✅ <b>Top Up Berhasil</b>
 👤 User: ${userDisplay}
 💰 Nominal: <b>Rp ${deposit.originalAmount}</b>
 🏦 Saldo Sekarang: <b>Rp ${user.saldo}</b>
 🕒 Waktu: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`,
-          { parse_mode: 'HTML' }
-        );
-      } catch (e) { logger.error('Gagal kirim notif top up ke grup:', e.message); }
-      // Hapus semua file di receipts setelah pembayaran sukses
-      try {
-        const receiptsDir = path.join(__dirname, 'receipts');
-        if (fs.existsSync(receiptsDir)) {
-          const files = fs.readdirSync(receiptsDir);
-          for (const file of files) {
-            fs.unlinkSync(path.join(receiptsDir, file));
-          }
-        }
-      } catch (e) { logger.error('Gagal menghapus file di receipts:', e.message); }
-      db.run('COMMIT');
-      global.processedTransactions.add(transactionKey);
-      delete global.pendingDeposits[uniqueCode];
-      db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
-      resolve(true);
-    } else {
-      db.run('ROLLBACK');
-      reject(new Error('Failed to send payment notification.'));
-    }
+                          { parse_mode: 'HTML' }
+                        );
+                      } catch (e) {
+                        logger.error('Gagal kirim notif top up ke grup:', e.message);
+                      }
+
+                      try {
+                        const receiptsDir = path.join(__dirname, 'receipts');
+                        if (fs.existsSync(receiptsDir)) {
+                          const files = fs.readdirSync(receiptsDir);
+                          for (const file of files) {
+                            fs.unlinkSync(path.join(receiptsDir, file));
+                          }
+                        }
+                      } catch (e) {
+                        logger.error('Gagal menghapus file di receipts:', e.message);
+                      }
+
+                      db.run('COMMIT');
+                      global.processedTransactions.add(transactionKey);
+                      delete global.pendingDeposits[uniqueCode];
+                      db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+                      resolve(true);
+                    } else {
+                      db.run('ROLLBACK');
+                      reject(new Error('Failed to send payment notification.'));
+                    }
                   });
                 }
               );

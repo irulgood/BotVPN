@@ -228,9 +228,36 @@ db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
   }
 });
 
-db.run(`ALTER TABLE pending_deposits ADD COLUMN purpose TEXT DEFAULT 'deposit'`, () => {});
-db.run(`ALTER TABLE pending_deposits ADD COLUMN payload TEXT`, () => {});
-db.run(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`, () => {});
+function ensurePendingDepositsSchema() {
+  const requiredColumns = [
+    { name: 'purpose', sql: "ALTER TABLE pending_deposits ADD COLUMN purpose TEXT DEFAULT 'deposit'" },
+    { name: 'payload', sql: "ALTER TABLE pending_deposits ADD COLUMN payload TEXT" },
+    { name: 'transaction_id', sql: "ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT" },
+    { name: 'error_count', sql: "ALTER TABLE pending_deposits ADD COLUMN error_count INTEGER DEFAULT 0" },
+    { name: 'last_error', sql: "ALTER TABLE pending_deposits ADD COLUMN last_error TEXT" },
+    { name: 'paid_at', sql: "ALTER TABLE pending_deposits ADD COLUMN paid_at INTEGER" },
+    { name: 'processed_at', sql: "ALTER TABLE pending_deposits ADD COLUMN processed_at INTEGER" }
+  ];
+
+  db.all("PRAGMA table_info(pending_deposits)", [], (err, rows) => {
+    if (err) {
+      logger.error('Gagal cek schema pending_deposits:', err.message);
+      return;
+    }
+    const existing = new Set((rows || []).map(r => r.name));
+    requiredColumns.forEach(col => {
+      if (!existing.has(col.name)) {
+        db.run(col.sql, (alterErr) => {
+          if (alterErr && !String(alterErr.message || '').includes('duplicate column')) {
+            logger.error(`Gagal menambahkan kolom ${col.name} di pending_deposits:`, alterErr.message);
+          }
+        });
+      }
+    });
+  });
+}
+
+ensurePendingDepositsSchema();
 
 db.run(`CREATE TABLE IF NOT EXISTS Server (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3987,26 +4014,128 @@ global.pendingDeposits = {};
 let lastRequestTime = 0;
 const requestInterval = 1000; 
 
-db.all('SELECT * FROM pending_deposits WHERE status IN ("pending","processing")', [], (err, rows) => {
-  if (err) {
-    logger.error('Gagal load pending_deposits:', err.message);
-    return;
-  }
-  rows.forEach(row => {
-    global.pendingDeposits[row.unique_code] = {
-      amount: row.amount,
-      originalAmount: row.original_amount,
-      userId: row.user_id,
-      timestamp: row.timestamp,
-      status: row.status,
-      qrMessageId: row.qr_message_id,
-      purpose: row.purpose || 'deposit',
-      payload: row.payload || null,
-      transactionId: row.transaction_id || null
-    };
+function loadPendingDepositsFromDb() {
+  db.all('SELECT * FROM pending_deposits WHERE status IN ("pending", "processing")', [], (err, rows) => {
+    if (err) {
+      logger.error('Gagal load pending_deposits:', err.message);
+      return;
+    }
+    global.pendingDeposits = {};
+    rows.forEach(row => {
+      global.pendingDeposits[row.unique_code] = {
+        amount: row.amount,
+        originalAmount: row.original_amount,
+        userId: row.user_id,
+        timestamp: row.timestamp,
+        status: row.status || 'pending',
+        qrMessageId: row.qr_message_id,
+        purpose: row.purpose || 'deposit',
+        payload: row.payload || null,
+        transactionId: row.transaction_id || null,
+        errorCount: row.error_count || 0,
+        lastError: row.last_error || null,
+        paidAt: row.paid_at || null,
+        processedAt: row.processed_at || null
+      };
+    });
+    logger.info('Pending deposit loaded:', Object.keys(global.pendingDeposits).length);
   });
-  logger.info('Pending deposit loaded:', Object.keys(global.pendingDeposits).length);
-});
+}
+
+setTimeout(loadPendingDepositsFromDb, 500);
+
+function savePendingDeposit(record) {
+  return new Promise((resolve, reject) => {
+    const now = record.timestamp || Date.now();
+    const values = [
+      record.uniqueCode,
+      record.userId,
+      Number(record.amount || 0),
+      Number(record.originalAmount || 0),
+      now,
+      record.status || 'pending',
+      record.qrMessageId || null,
+      record.purpose || 'deposit',
+      record.payload || null,
+      record.transactionId || null
+    ];
+
+    db.run(
+      `INSERT OR REPLACE INTO pending_deposits
+      (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id, purpose, payload, transaction_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      values,
+      function(err) {
+        if (!err) return resolve(true);
+
+        if (String(err.message || '').includes('no column named')) {
+          logger.warn(`Schema pending_deposits belum lengkap, fallback insert minimal: ${err.message}`);
+          db.run(
+            `INSERT OR REPLACE INTO pending_deposits
+            (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [record.uniqueCode, record.userId, Number(record.amount || 0), Number(record.originalAmount || 0), now, record.status || 'pending', record.qrMessageId || null],
+            function(minErr) {
+              if (minErr) return reject(minErr);
+              ensurePendingDepositsSchema();
+              resolve(true);
+            }
+          );
+          return;
+        }
+
+        reject(err);
+      }
+    );
+  });
+}
+
+function markPendingDeposit(uniqueCode, patch = {}) {
+  const current = global.pendingDeposits?.[uniqueCode] || {};
+  const merged = { ...current, ...patch };
+  if (global.pendingDeposits?.[uniqueCode]) {
+    global.pendingDeposits[uniqueCode] = merged;
+  }
+
+  const fields = [];
+  const values = [];
+  const map = {
+    status: 'status',
+    errorCount: 'error_count',
+    lastError: 'last_error',
+    paidAt: 'paid_at',
+    processedAt: 'processed_at',
+    transactionId: 'transaction_id'
+  };
+
+  Object.entries(map).forEach(([key, column]) => {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      fields.push(`${column} = ?`);
+      values.push(patch[key]);
+    }
+  });
+
+  if (fields.length) {
+    values.push(uniqueCode);
+    db.run(`UPDATE pending_deposits SET ${fields.join(', ')} WHERE unique_code = ?`, values, (err) => {
+      if (err && !String(err.message || '').includes('no such column')) {
+        logger.error(`Gagal update pending_deposits ${uniqueCode}: ${err.message}`);
+      }
+    });
+  }
+
+  return merged;
+}
+
+function extractOrkutHistoryResults(data) {
+  if (!data || typeof data !== 'object') return [];
+  if (Array.isArray(data?.qris_history?.results)) return data.qris_history.results;
+  if (Array.isArray(data?.qris_history)) return data.qris_history;
+  if (Array.isArray(data?.results)) return data.results;
+  if (Array.isArray(data?.data?.results)) return data.data.results;
+  if (Array.isArray(data?.data?.qris_history?.results)) return data.data.qris_history.results;
+  return [];
+}
 
 function generateRandomNumber(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -4151,23 +4280,18 @@ async function createServiceOrderQRIS(ctx, order) {
       payload: JSON.stringify(order)
     };
 
-    db.run(
-      `INSERT INTO pending_deposits
-      (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id, purpose, payload, transaction_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        uniqueCode,
-        userId,
-        finalAmount,
-        Number(order.totalHarga),
-        Date.now(),
-        'pending',
-        qrMessage?.message_id,
-        'service_order',
-        JSON.stringify(order),
-        transactionId
-      ]
-    );
+    await savePendingDeposit({
+      uniqueCode,
+      userId,
+      amount: finalAmount,
+      originalAmount: Number(order.totalHarga),
+      timestamp: Date.now(),
+      status: 'pending',
+      qrMessageId: qrMessage?.message_id,
+      purpose: 'service_order',
+      payload: JSON.stringify(order),
+      transactionId
+    });
 
     delete userState[ctx.chat.id];
     try { await ctx.deleteMessage(); } catch {}
@@ -4404,23 +4528,18 @@ async function processDeposit(ctx, amount) {
     // ======================
     // SIMPAN DB
     // ======================
-    db.run(
-      `INSERT INTO pending_deposits 
-      (unique_code, user_id, amount, original_amount, timestamp, status, qr_message_id, purpose, payload, transaction_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        uniqueCode,
-        userId,
-        finalAmount,
-        Number(amount),
-        Date.now(),
-        'pending',
-        qrMessage?.message_id,
-        'deposit',
-        null,
-        transactionId
-      ]
-    );
+    await savePendingDeposit({
+      uniqueCode,
+      userId,
+      amount: finalAmount,
+      originalAmount: Number(amount),
+      timestamp: Date.now(),
+      status: 'pending',
+      qrMessageId: qrMessage?.message_id,
+      purpose: 'deposit',
+      payload: null,
+      transactionId
+    });
 
     // bersihin state lama
     if (global.depositState?.[userId]) delete global.depositState[userId];
@@ -4445,51 +4564,53 @@ async function checkQRISStatus() {
   const now = Date.now();
 
   for (const [uniqueCode, deposit] of Object.entries(global.pendingDeposits)) {
-    if (deposit.status !== 'pending') continue;
+    if (!deposit || deposit.status !== 'pending') continue;
 
     try {
-      // EXPIRATION
-      let maxAge = vars.PAYMENT === "GOPAY" ? 15 * 60 * 1000 : 3600 * 1000; // 15 menit vs 1 jam
-      if (now - deposit.timestamp > maxAge) {
+      const maxAge = vars.PAYMENT === 'GOPAY' ? 15 * 60 * 1000 : 60 * 60 * 1000;
+      if (now - Number(deposit.timestamp || 0) > maxAge) {
         logger.warn(`EXPIRED ${uniqueCode}`);
+        markPendingDeposit(uniqueCode, { status: 'expired', lastError: 'expired' });
+        await safeSendToUser(deposit.userId, '❌ QRIS sudah expired. Silakan buat transaksi baru.');
         delete global.pendingDeposits[uniqueCode];
-        db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
         continue;
       }
 
-      // PROVIDER-SPECIFIC LOGIC
-      if (vars.PAYMENT === "GOPAY") {
-        // Cek status via API GoPay
+      if (vars.PAYMENT === 'GOPAY') {
         const res = await axios.post(
-          "https://api-gopay.sawargipay.cloud/qris/status",
+          'https://api-gopay.sawargipay.cloud/qris/status',
           { transaction_id: deposit.transactionId },
           {
             headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${GOPAY_KEY}`
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${GOPAY_KEY}`
             },
             timeout: 15000
           }
         );
 
         const data = res.data?.data;
-        if (!data) continue;
-
-        const status = data.transaction_status;
-        logger.info(`🔍 ${uniqueCode} | ${status}`);
-        if (status !== "settlement") continue;
-
-        logger.info(`💰 PEMBAYARAN MASUK ${uniqueCode}`);
-        deposit.status = 'processing';
-        db.run('UPDATE pending_deposits SET status = ? WHERE unique_code = ?', ['processing', uniqueCode]);
-        const success = await processMatchingPayment(deposit, data, uniqueCode);
-        if (!success) {
-          delete global.pendingDeposits[uniqueCode];
-          db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+        if (!data) {
+          const count = Number(deposit.errorCount || 0) + 1;
+          markPendingDeposit(uniqueCode, { errorCount: count, lastError: 'invalid_gopay_response' });
+          logger.warn(`[QRIS] Response GOPAY tidak valid ${uniqueCode}`);
+          continue;
         }
 
-      } else if (vars.PAYMENT === "ORKUT") {
-        // Cek status via API Orkut
+        const status = String(data.transaction_status || '').toLowerCase();
+        logger.info(`🔍 ${uniqueCode} | ${status}`);
+        if (status !== 'settlement') continue;
+
+        logger.info(`[QRIS] MATCH ${uniqueCode}`);
+        markPendingDeposit(uniqueCode, { status: 'processing', paidAt: Date.now(), transactionId: deposit.transactionId || data.transaction_id || null });
+        const success = await processMatchingPayment({ ...deposit, status: 'processing' }, data, uniqueCode);
+        if (success) {
+          delete global.pendingDeposits[uniqueCode];
+        } else {
+          markPendingDeposit(uniqueCode, { status: 'review', lastError: 'process_failed_after_paid' });
+          delete global.pendingDeposits[uniqueCode];
+        }
+      } else if (vars.PAYMENT === 'ORKUT') {
         const params = new URLSearchParams();
         params.append('username', AUTH_USER);
         params.append('token', AUTH_TOKEN);
@@ -4507,20 +4628,27 @@ async function checkQRISStatus() {
           }
         );
 
-        const data = res.data;
-        if (!data?.success || !data.qris_history?.results) {
+        const list = extractOrkutHistoryResults(res.data);
+        if (!list.length) {
+          const count = Number(deposit.errorCount || 0) + 1;
           logger.warn(`[QRIS] Response tidak valid ${uniqueCode}`);
+          logger.warn(`[QRIS] RAW ${uniqueCode}: ${JSON.stringify(res.data).slice(0, 500)}`);
+          markPendingDeposit(uniqueCode, { errorCount: count, lastError: 'invalid_orkut_response' });
+          if (count >= 6) {
+            markPendingDeposit(uniqueCode, { status: 'review', lastError: 'invalid_orkut_response_review' });
+            await safeSendToUser(deposit.userId, '⚠️ Pembayaran QRIS sedang diverifikasi manual karena respons provider tidak valid. Jika sudah membayar, tunggu admin mengecek transaksi Anda.');
+            delete global.pendingDeposits[uniqueCode];
+          }
           continue;
         }
 
-        const list = data.qris_history.results;
         const normalize = v => Number(String(v || '').replace(/[^\d]/g, '')) || 0;
         const targetAmount = normalize(deposit.amount);
-
         const match = list.find(tx => {
-          const kredit = normalize(tx.kredit);
-          const status = String(tx.status || '').toUpperCase();
-          return kredit === targetAmount && status === 'IN';
+          const kredit = normalize(tx.kredit ?? tx.amount ?? tx.nominal);
+          const status = String(tx.status || tx.type || '').toUpperCase();
+          const statusOk = !status || status === 'IN' || status === 'SUCCESS' || status === 'BERHASIL';
+          return kredit === targetAmount && statusOk;
         });
 
         if (!match) {
@@ -4529,34 +4657,34 @@ async function checkQRISStatus() {
         }
 
         logger.info(`[QRIS] MATCH ${uniqueCode}`);
-        deposit.status = 'processing';
-        db.run('UPDATE pending_deposits SET status = ? WHERE unique_code = ?', ['processing', uniqueCode]);
-        const success = await processMatchingPayment(deposit, match, uniqueCode);
+        markPendingDeposit(uniqueCode, { status: 'processing', paidAt: Date.now(), transactionId: deposit.transactionId || match.reference_id || match.reference || null });
+        const success = await processMatchingPayment({ ...deposit, status: 'processing' }, match, uniqueCode);
         if (success) {
           logger.info(`[QRIS] SUCCESS ${uniqueCode}`);
-        } else {
           delete global.pendingDeposits[uniqueCode];
-          db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+        } else {
+          markPendingDeposit(uniqueCode, { status: 'review', lastError: 'process_failed_after_paid' });
+          delete global.pendingDeposits[uniqueCode];
         }
       }
-
     } catch (err) {
       const statusCode = err?.response?.status;
       if (statusCode === 469) {
-        logger.warn(`[QRIS] EXPIRED ${uniqueCode}: ${err.message}`);
-        deposit.status = 'expired';
-        db.run('UPDATE pending_deposits SET status = ? WHERE unique_code = ?', ['expired', uniqueCode]);
-        await safeSendToUser(deposit.userId, '❌ Pembayaran QRIS sudah expired atau tidak valid. Silakan buat transaksi baru.');
+        logger.warn(`[QRIS] EXPIRED/INVALID ${uniqueCode}`);
+        markPendingDeposit(uniqueCode, { status: 'expired', lastError: `provider_${statusCode}` });
+        await safeSendToUser(deposit.userId, '❌ QRIS sudah tidak valid atau sudah expired. Silakan buat transaksi baru.');
         delete global.pendingDeposits[uniqueCode];
         continue;
       }
 
-      if (deposit.status === 'processing') {
-        logger.warn(`[QRIS] Tetap processing ${uniqueCode}: ${err.message}`);
-        continue;
-      }
-
+      const count = Number(deposit.errorCount || 0) + 1;
+      markPendingDeposit(uniqueCode, { errorCount: count, lastError: String(err.message || 'unknown_error') });
       logger.error(`[QRIS] ERROR ${uniqueCode}: ${err.message}`);
+      if (count >= 6) {
+        markPendingDeposit(uniqueCode, { status: 'review', lastError: String(err.message || 'unknown_error') });
+        await safeSendToUser(deposit.userId, '⚠️ Pembayaran QRIS sedang diverifikasi manual karena koneksi provider bermasalah. Jika sudah membayar, tunggu admin mengecek transaksi Anda.');
+        delete global.pendingDeposits[uniqueCode];
+      }
     }
   }
 }
@@ -4664,7 +4792,7 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
     db.serialize(() => {
       db.run('BEGIN TRANSACTION');
       db.get(
-        'SELECT id, type FROM transactions WHERE reference_id = ? AND type IN ("deposit","service_order_qris") LIMIT 1',
+        'SELECT id, type FROM transactions WHERE reference_id = ? LIMIT 1',
         [referenceId],
         async (err, row) => {
           if (err) {
@@ -4684,23 +4812,6 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
           }
 
           if ((deposit.purpose || 'deposit') === 'service_order') {
-            let order = null;
-            try { order = JSON.parse(deposit.payload || '{}'); } catch (e) {}
-
-            if (!order || !order.action || !order.type || !order.serverId) {
-              db.run('ROLLBACK');
-              logger.error(`Service order payload invalid for ${uniqueCode}`);
-              updateUserBalance(deposit.userId, Number(deposit.originalAmount || 0)).catch(() => {});
-              safeSendToUser(
-                deposit.userId,
-                `⚠️ Pembayaran QRIS berhasil, tetapi data pesanan rusak. Dana Rp ${Number(deposit.originalAmount || 0).toLocaleString('id-ID')} sudah dimasukkan ke saldo Anda.`
-              ).catch(() => {});
-              db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
-              delete global.pendingDeposits[uniqueCode];
-              resolve(false);
-              return;
-            }
-
             db.run(
               'INSERT INTO transactions (user_id, amount, type, reference_id, timestamp) VALUES (?, ?, ?, ?, ?)',
               [deposit.userId, deposit.originalAmount, 'service_order_qris', referenceId, Date.now()],
@@ -4713,25 +4824,59 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
                 }
 
                 db.run('COMMIT');
+                markPendingDeposit(uniqueCode, { status: 'processing', paidAt: Date.now(), transactionId: referenceId });
+
                 if (deposit.qrMessageId) {
                   try { await bot.telegram.deleteMessage(deposit.userId, deposit.qrMessageId); } catch (e) {}
                 }
 
-                await safeSendToUser(deposit.userId, '✅ Pembayaran QRIS berhasil. Sedang memproses pesanan Anda...');
-
-                const result = await executeServiceOrder(
-                  { ...(order || {}), userId: deposit.userId, totalHarga: deposit.originalAmount },
-                  { chargeBalance: false, paymentSource: 'qris' }
-                );
-
-                delete global.pendingDeposits[uniqueCode];
-                db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
-
-                if (!result.success) {
-                  logger.warn(`Service order QRIS gagal diproses untuk ${uniqueCode}: ${result.msg}`);
+                let order = null;
+                try { order = JSON.parse(deposit.payload || '{}'); } catch (e) {
+                  logger.error(`Payload order QRIS rusak ${uniqueCode}: ${e.message}`);
                 }
 
-                resolve(true);
+                if (!order || !order.action || !order.type || !order.serverId) {
+                  await updateUserBalance(deposit.userId, deposit.originalAmount);
+                  markPendingDeposit(uniqueCode, { status: 'failed_refunded', processedAt: Date.now(), lastError: 'invalid_order_payload' });
+                  await safeSendToUser(deposit.userId, `⚠️ Pembayaran QRIS berhasil, tetapi data pesanan tidak valid. Dana Rp ${Number(deposit.originalAmount || 0).toLocaleString('id-ID')} sudah dimasukkan ke saldo Anda.`);
+                  delete global.pendingDeposits[uniqueCode];
+                  db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+                  resolve(false);
+                  return;
+                }
+
+                await safeSendToUser(deposit.userId, '✅ Pembayaran QRIS berhasil. Sedang memproses pesanan Anda...');
+
+                try {
+                  const result = await executeServiceOrder(
+                    { ...(order || {}), userId: deposit.userId, totalHarga: deposit.originalAmount },
+                    { chargeBalance: false, paymentSource: 'qris' }
+                  );
+
+                  if (!result?.success) {
+                    logger.warn(`Service order QRIS gagal diproses untuk ${uniqueCode}: ${result?.msg}`);
+                    markPendingDeposit(uniqueCode, { status: 'failed_refunded', processedAt: Date.now(), lastError: String(result?.msg || 'service_order_failed') });
+                    delete global.pendingDeposits[uniqueCode];
+                    db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+                    resolve(false);
+                    return;
+                  }
+
+                  markPendingDeposit(uniqueCode, { status: 'success', processedAt: Date.now(), lastError: null });
+                  delete global.pendingDeposits[uniqueCode];
+                  db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+                  resolve(true);
+                } catch (serviceErr) {
+                  logger.error(`executeServiceOrder error ${uniqueCode}: ${serviceErr.message}`);
+                  await updateUserBalance(deposit.userId, deposit.originalAmount);
+                  markPendingDeposit(uniqueCode, { status: 'failed_refunded', processedAt: Date.now(), lastError: String(serviceErr.message || 'execute_service_order_error') });
+                  await safeSendToUser(deposit.userId, `⚠️ Pembayaran QRIS berhasil, tetapi pesanan gagal diproses. Dana Rp ${Number(deposit.originalAmount || 0).toLocaleString('id-ID')} sudah dimasukkan ke saldo Anda.
+
+Detail: ${serviceErr.message}`);
+                  delete global.pendingDeposits[uniqueCode];
+                  db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+                  resolve(false);
+                }
               }
             );
             return;

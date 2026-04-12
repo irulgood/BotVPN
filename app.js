@@ -3987,7 +3987,7 @@ global.pendingDeposits = {};
 let lastRequestTime = 0;
 const requestInterval = 1000; 
 
-db.all('SELECT * FROM pending_deposits WHERE status = "pending"', [], (err, rows) => {
+db.all('SELECT * FROM pending_deposits WHERE status IN ("pending","processing")', [], (err, rows) => {
   if (err) {
     logger.error('Gagal load pending_deposits:', err.message);
     return;
@@ -4541,13 +4541,28 @@ async function checkQRISStatus() {
       }
 
     } catch (err) {
+      const statusCode = err?.response?.status;
+      if (statusCode === 469) {
+        logger.warn(`[QRIS] EXPIRED ${uniqueCode}: ${err.message}`);
+        deposit.status = 'expired';
+        db.run('UPDATE pending_deposits SET status = ? WHERE unique_code = ?', ['expired', uniqueCode]);
+        await safeSendToUser(deposit.userId, '❌ Pembayaran QRIS sudah expired atau tidak valid. Silakan buat transaksi baru.');
+        delete global.pendingDeposits[uniqueCode];
+        continue;
+      }
+
+      if (deposit.status === 'processing') {
+        logger.warn(`[QRIS] Tetap processing ${uniqueCode}: ${err.message}`);
+        continue;
+      }
+
       logger.error(`[QRIS] ERROR ${uniqueCode}: ${err.message}`);
     }
   }
 }
 
 // AUTO LOOP
-setInterval(checkQRISStatus, 5000);
+setInterval(checkQRISStatus, 10000);
 
 function keyboard_abc() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz';
@@ -4649,7 +4664,7 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
     db.serialize(() => {
       db.run('BEGIN TRANSACTION');
       db.get(
-        'SELECT id, type FROM transactions WHERE reference_id = ? LIMIT 1',
+        'SELECT id, type FROM transactions WHERE reference_id = ? AND type IN ("deposit","service_order_qris") LIMIT 1',
         [referenceId],
         async (err, row) => {
           if (err) {
@@ -4669,6 +4684,23 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
           }
 
           if ((deposit.purpose || 'deposit') === 'service_order') {
+            let order = null;
+            try { order = JSON.parse(deposit.payload || '{}'); } catch (e) {}
+
+            if (!order || !order.action || !order.type || !order.serverId) {
+              db.run('ROLLBACK');
+              logger.error(`Service order payload invalid for ${uniqueCode}`);
+              updateUserBalance(deposit.userId, Number(deposit.originalAmount || 0)).catch(() => {});
+              safeSendToUser(
+                deposit.userId,
+                `⚠️ Pembayaran QRIS berhasil, tetapi data pesanan rusak. Dana Rp ${Number(deposit.originalAmount || 0).toLocaleString('id-ID')} sudah dimasukkan ke saldo Anda.`
+              ).catch(() => {});
+              db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+              delete global.pendingDeposits[uniqueCode];
+              resolve(false);
+              return;
+            }
+
             db.run(
               'INSERT INTO transactions (user_id, amount, type, reference_id, timestamp) VALUES (?, ?, ?, ?, ?)',
               [deposit.userId, deposit.originalAmount, 'service_order_qris', referenceId, Date.now()],
@@ -4685,10 +4717,8 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
                   try { await bot.telegram.deleteMessage(deposit.userId, deposit.qrMessageId); } catch (e) {}
                 }
 
-                let order = null;
-                try { order = JSON.parse(deposit.payload || '{}'); } catch (e) {}
-
                 await safeSendToUser(deposit.userId, '✅ Pembayaran QRIS berhasil. Sedang memproses pesanan Anda...');
+
                 const result = await executeServiceOrder(
                   { ...(order || {}), userId: deposit.userId, totalHarga: deposit.originalAmount },
                   { chargeBalance: false, paymentSource: 'qris' }

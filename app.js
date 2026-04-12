@@ -4029,7 +4029,7 @@ function loadPendingDepositsFromDb() {
         timestamp: row.timestamp,
         status: row.status || 'pending',
         qrMessageId: row.qr_message_id,
-        purpose: row.purpose || 'deposit',
+        purpose: row.purpose || (row.payload ? 'service_order' : (String(row.unique_code || '').startsWith('order-') ? 'service_order' : 'deposit')),
         payload: row.payload || null,
         transactionId: row.transaction_id || null,
         errorCount: row.error_count || 0,
@@ -4558,6 +4558,18 @@ async function processDeposit(ctx, amount) {
   }
 }
 
+function getPendingPurpose(deposit, uniqueCode) {
+  if (deposit?.purpose) return deposit.purpose;
+  if (deposit?.payload) return 'service_order';
+  if (String(uniqueCode || '').startsWith('order-')) return 'service_order';
+  return 'deposit';
+}
+
+function isOrkutAuthErrorResponse(raw) {
+  const msg = String(raw?.message || raw?.msg || '').toLowerCase();
+  return raw && raw.success === false && msg.includes('token');
+}
+
 async function checkQRISStatus() {
   if (!global.pendingDeposits || Object.keys(global.pendingDeposits).length === 0) return;
 
@@ -4628,27 +4640,31 @@ async function checkQRISStatus() {
           }
         );
 
-        const list = extractOrkutHistoryResults(res.data);
-        if (!list.length) {
+        const data = res.data;
+        if (!data?.success || !data.qris_history?.results) {
           const count = Number(deposit.errorCount || 0) + 1;
           logger.warn(`[QRIS] Response tidak valid ${uniqueCode}`);
-          logger.warn(`[QRIS] RAW ${uniqueCode}: ${JSON.stringify(res.data).slice(0, 500)}`);
-          markPendingDeposit(uniqueCode, { errorCount: count, lastError: 'invalid_orkut_response' });
-          if (count >= 6) {
-            markPendingDeposit(uniqueCode, { status: 'review', lastError: 'invalid_orkut_response_review' });
-            await safeSendToUser(deposit.userId, '⚠️ Pembayaran QRIS sedang diverifikasi manual karena respons provider tidak valid. Jika sudah membayar, tunggu admin mengecek transaksi Anda.');
+          logger.warn(`[QRIS] RAW ${uniqueCode}: ${JSON.stringify(data).slice(0, 500)}`);
+
+          if (isOrkutAuthErrorResponse(data)) {
+            markPendingDeposit(uniqueCode, { status: 'review', errorCount: count, lastError: 'orkut_auth_invalid' });
+            await safeSendToUser(deposit.userId, '⚠️ Verifikasi QRIS provider gagal karena token API tidak valid. Pembayaran Anda akan dicek manual oleh admin.');
             delete global.pendingDeposits[uniqueCode];
+            continue;
           }
+
+          markPendingDeposit(uniqueCode, { errorCount: count, lastError: 'invalid_orkut_response' });
           continue;
         }
 
+        const list = data.qris_history.results;
         const normalize = v => Number(String(v || '').replace(/[^\d]/g, '')) || 0;
         const targetAmount = normalize(deposit.amount);
+
         const match = list.find(tx => {
-          const kredit = normalize(tx.kredit ?? tx.amount ?? tx.nominal);
-          const status = String(tx.status || tx.type || '').toUpperCase();
-          const statusOk = !status || status === 'IN' || status === 'SUCCESS' || status === 'BERHASIL';
-          return kredit === targetAmount && statusOk;
+          const kredit = normalize(tx.kredit);
+          const status = String(tx.status || '').toUpperCase();
+          return kredit === targetAmount && status === 'IN';
         });
 
         if (!match) {
@@ -4657,7 +4673,12 @@ async function checkQRISStatus() {
         }
 
         logger.info(`[QRIS] MATCH ${uniqueCode}`);
-        markPendingDeposit(uniqueCode, { status: 'processing', paidAt: Date.now(), transactionId: deposit.transactionId || match.reference_id || match.reference || null });
+        markPendingDeposit(uniqueCode, {
+          status: 'processing',
+          paidAt: Date.now(),
+          transactionId: deposit.transactionId || match.reference_id || match.reference || null,
+          lastError: null
+        });
         const success = await processMatchingPayment({ ...deposit, status: 'processing' }, match, uniqueCode);
         if (success) {
           logger.info(`[QRIS] SUCCESS ${uniqueCode}`);
@@ -4690,7 +4711,7 @@ async function checkQRISStatus() {
 }
 
 // AUTO LOOP
-setInterval(checkQRISStatus, 10000);
+setInterval(checkQRISStatus, 5000);
 
 function keyboard_abc() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz';
@@ -4811,7 +4832,7 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
             return;
           }
 
-          if ((deposit.purpose || 'deposit') === 'service_order') {
+          if (getPendingPurpose(deposit, uniqueCode) === 'service_order') {
             db.run(
               'INSERT INTO transactions (user_id, amount, type, reference_id, timestamp) VALUES (?, ?, ?, ?, ?)',
               [deposit.userId, deposit.originalAmount, 'service_order_qris', referenceId, Date.now()],

@@ -214,23 +214,60 @@ const db = new sqlite3.Database('./sellvpn.db', (err) => {
   }
 });
 
-db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
-  unique_code TEXT PRIMARY KEY,
-  user_id INTEGER,
-  amount INTEGER,
-  original_amount INTEGER,
-  timestamp INTEGER,
-  status TEXT,
-  qr_message_id INTEGER
-)`, (err) => {
-  if (err) {
-    logger.error('Kesalahan membuat tabel pending_deposits:', err.message);
-  }
-});
+function dbRunAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) return reject(err);
+      resolve(this);
+    });
+  });
+}
 
-db.run(`ALTER TABLE pending_deposits ADD COLUMN purpose TEXT DEFAULT 'deposit'`, () => {});
-db.run(`ALTER TABLE pending_deposits ADD COLUMN payload TEXT`, () => {});
-db.run(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`, () => {});
+function dbAllAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) return reject(err);
+      resolve(rows);
+    });
+  });
+}
+
+async function ensurePendingDepositsSchema() {
+  try {
+    await dbRunAsync(`CREATE TABLE IF NOT EXISTS pending_deposits (
+      unique_code TEXT PRIMARY KEY,
+      user_id INTEGER,
+      amount INTEGER,
+      original_amount INTEGER,
+      timestamp INTEGER,
+      status TEXT,
+      qr_message_id INTEGER
+    )`);
+
+    const columns = await dbAllAsync(`PRAGMA table_info(pending_deposits)`);
+    const existing = new Set(columns.map(col => String(col.name).toLowerCase()));
+
+    if (!existing.has('purpose')) {
+      await dbRunAsync(`ALTER TABLE pending_deposits ADD COLUMN purpose TEXT DEFAULT 'deposit'`);
+      logger.info('Kolom purpose berhasil ditambahkan ke pending_deposits');
+    }
+
+    if (!existing.has('payload')) {
+      await dbRunAsync(`ALTER TABLE pending_deposits ADD COLUMN payload TEXT`);
+      logger.info('Kolom payload berhasil ditambahkan ke pending_deposits');
+    }
+
+    if (!existing.has('transaction_id')) {
+      await dbRunAsync(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`);
+      logger.info('Kolom transaction_id berhasil ditambahkan ke pending_deposits');
+    }
+
+    logger.info('Migrasi pending_deposits selesai');
+  } catch (err) {
+    logger.error('Gagal migrasi pending_deposits:', err.message);
+    throw err;
+  }
+}
 
 db.run(`CREATE TABLE IF NOT EXISTS Server (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3987,26 +4024,34 @@ global.pendingDeposits = {};
 let lastRequestTime = 0;
 const requestInterval = 1000; 
 
-db.all('SELECT * FROM pending_deposits WHERE status = "pending"', [], (err, rows) => {
-  if (err) {
-    logger.error('Gagal load pending_deposits:', err.message);
-    return;
+async function initializePendingDepositsCache() {
+  try {
+    await ensurePendingDepositsSchema();
+
+    const rows = await dbAllAsync('SELECT * FROM pending_deposits WHERE status = ?', ['pending']);
+    global.pendingDeposits = {};
+
+    rows.forEach(row => {
+      global.pendingDeposits[row.unique_code] = {
+        amount: row.amount,
+        originalAmount: row.original_amount,
+        userId: row.user_id,
+        timestamp: row.timestamp,
+        status: row.status,
+        qrMessageId: row.qr_message_id,
+        purpose: row.purpose || 'deposit',
+        payload: row.payload || null,
+        transactionId: row.transaction_id || null
+      };
+    });
+
+    logger.info(`Pending deposit loaded: ${Object.keys(global.pendingDeposits).length}`);
+  } catch (err) {
+    logger.error('Gagal initialize pending_deposits cache:', err.message);
   }
-  rows.forEach(row => {
-    global.pendingDeposits[row.unique_code] = {
-      amount: row.amount,
-      originalAmount: row.original_amount,
-      userId: row.user_id,
-      timestamp: row.timestamp,
-      status: row.status,
-      qrMessageId: row.qr_message_id,
-      purpose: row.purpose || 'deposit',
-      payload: row.payload || null,
-      transactionId: row.transaction_id || null
-    };
-  });
-  logger.info('Pending deposit loaded:', Object.keys(global.pendingDeposits).length);
-});
+}
+
+initializePendingDepositsCache();
 
 function generateRandomNumber(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -4170,7 +4215,7 @@ async function createServiceOrderQRIS(ctx, order) {
     );
 
     delete userState[ctx.chat.id];
-    try { await ctx.deleteMessage(); } catch (e) {}
+    try { await ctx.deleteMessage(); } catch {}
   } catch (error) {
     logger.error(`QRIS order error: ${error.message}`);
     await safeReplyMessage(ctx, `❌ Gagal membuat QRIS order.\n⚠️ Detail: ${error.message}`);
@@ -4261,7 +4306,7 @@ async function processDeposit(ctx, amount) {
         '⚠️ *Terlalu banyak request, tunggu dulu ya.*',
         { parse_mode: 'Markdown' }
       );
-    } catch {
+    } catch (e) {
       await safeReplyMessage(ctx, '⚠️ *Terlalu banyak request, tunggu dulu ya.*', { parse_mode: 'Markdown' });
     }
     return;
@@ -4429,7 +4474,7 @@ async function processDeposit(ctx, amount) {
     // bersihin state lama
     if (global.depositState?.[userId]) delete global.depositState[userId];
 
-    try { await ctx.deleteMessage(); } catch (e) {}
+    try { await ctx.deleteMessage(); } catch {}
 
   } catch (error) {
     console.error("❌ Deposit error:", error.message);

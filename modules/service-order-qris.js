@@ -1,3 +1,5 @@
+
+// modules/service-order-qris.js
 module.exports = function createServiceOrderModule(deps) {
   const {
     bot,
@@ -10,8 +12,18 @@ module.exports = function createServiceOrderModule(deps) {
     safeGroupSend,
     updateUserBalance,
     recordAccountTransaction,
+    createvmess,
+    createvless,
+    createtrojan,
+    createshadowsocks,
     createssh,
+    createzivudp,
+    renewvmess,
+    renewvless,
+    renewtrojan,
+    renewshadowsocks,
     renewssh,
+    renewzivudp,
     AUTH_USER,
     AUTH_TOKEN,
     GOPAY_KEY,
@@ -35,8 +47,8 @@ module.exports = function createServiceOrderModule(deps) {
 
   function formatOrderSummary(order) {
     const actionLabel = order.action === 'create' ? 'Buat Akun' : 'Perpanjang Akun';
-    const typeLabel = String(order.type || '').toUpperCase();
-    const usernameLine = order.username ? `👤 Password: ${order.username}\n` : '';
+    const typeLabel = order.type === 'zivudp' ? 'ZIV UDP' : String(order.type || '').toUpperCase();
+    const usernameLine = order.username ? `👤 Username: ${order.username}\n` : '';
     const expLine = order.exp ? `📅 Masa aktif: ${order.exp} hari\n` : '';
     return `🧾 Detail Pesanan\n\n` +
       `🛠 Layanan: ${actionLabel} ${typeLabel}\n` +
@@ -54,8 +66,7 @@ module.exports = function createServiceOrderModule(deps) {
           [{ text: '💳 Bayar Saldo', callback_data: 'pay_balance' }],
           [{ text: '📷 Bayar QRIS', callback_data: 'pay_qris' }]
         ]
-      },
-      parse_mode: 'Markdown'
+      }
     });
   }
 
@@ -84,9 +95,19 @@ module.exports = function createServiceOrderModule(deps) {
 
     try {
       if (action === 'create') {
-        if (type === 'ssh') msg = await createssh(username, password, exp, iplimit, serverId);
+        if (type === 'vmess') msg = await createvmess(username, exp, quota, iplimit, serverId);
+        else if (type === 'vless') msg = await createvless(username, exp, quota, iplimit, serverId);
+        else if (type === 'trojan') msg = await createtrojan(username, exp, quota, iplimit, serverId);
+        else if (type === 'shadowsocks') msg = await createshadowsocks(username, exp, quota, iplimit, serverId);
+        else if (type === 'ssh') msg = await createssh(username, password, exp, iplimit, serverId);
+        else if (type === 'zivudp') msg = await createzivudp(username, password, exp, iplimit, serverId);
       } else if (action === 'renew') {
-        if (type === 'ssh') msg = await renewssh(username, password, exp, iplimit, serverId);
+        if (type === 'vmess') msg = await renewvmess(username, exp, quota, iplimit, serverId);
+        else if (type === 'vless') msg = await renewvless(username, exp, quota, iplimit, serverId);
+        else if (type === 'trojan') msg = await renewtrojan(username, exp, quota, iplimit, serverId);
+        else if (type === 'shadowsocks') msg = await renewshadowsocks(username, exp, quota, iplimit, serverId);
+        else if (type === 'ssh') msg = await renewssh(username, exp, iplimit, serverId);
+        else if (type === 'zivudp') msg = await renewzivudp(username, exp, iplimit, serverId);
       }
 
       if (!msg || msg.includes('❌')) {
@@ -106,16 +127,17 @@ module.exports = function createServiceOrderModule(deps) {
 
       await recordAccountTransaction(userId, type);
 
-      const maskedPassword = password && password.length > 1
-        ? `${password.slice(0, 1)}${'x'.repeat(password.length - 1)}`
-        : (password || '-');
+      const userInfo = await bot.telegram.getChat(userId).catch(() => ({ first_name: String(userId) }));
+      const maskedUsername = username && username.length > 1
+        ? `${username.slice(0, 1)}${'x'.repeat(username.length - 1)}`
+        : (username || '-');
 
       await safeGroupSend(
         `${action === 'create' ? '📢' : '♻️'} <b>${action === 'create' ? 'Account Created' : 'Account Renewed'}</b>\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `👤 <b>User:</b> ${userId}\n` +
-        `🧾 <b>Type:</b> ${String(type).toUpperCase()}\n` +
-        `📛 <b>Password:</b> ${maskedPassword}\n` +
+        `👤 <b>User:</b> ${userInfo.first_name || userId} (${userId})\n` +
+        `🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : String(type).toUpperCase()}\n` +
+        `📛 <b>Username:</b> ${maskedUsername}\n` +
         `📆 <b>Expired:</b> ${exp || '0'}\n` +
         `🌐 <b>Server ID:</b> ${serverId}\n` +
         `💳 <b>Metode:</b> ${paymentSource.toUpperCase()}\n` +
@@ -180,8 +202,7 @@ module.exports = function createServiceOrderModule(deps) {
         const caption = formatOrderSummary(order) +
           `\n\n💰 Total bayar: Rp ${finalAmount.toLocaleString('id-ID')}\n⏱️ Expired: 10 menit\n⚠️ Transfer harus sama persis!\n\n🔗 Klik QRIS: ${safeQrUrl}`;
         qrMessage = await safeReplyMessage(ctx, caption, {
-          reply_markup: { inline_keyboard: [[{ text: '❌ Batal', callback_data: `batal_topup_${uniqueCode}` }]] },
-          parse_mode: 'Markdown'
+          reply_markup: { inline_keyboard: [[{ text: '❌ Batal', callback_data: `batal_topup_${uniqueCode}` }]] }
         });
       } else if (vars.PAYMENT === 'ORKUT') {
         const res = await axios.get('https://orkut.rajaserver.web.id/api/qris', {
@@ -250,6 +271,7 @@ module.exports = function createServiceOrderModule(deps) {
     sendPaymentMethodPrompt,
     createServiceOrderQRIS,
     executeServiceOrder,
-    safeSendToUser
+    safeSendToUser,
+    formatOrderSummary,
   };
 };

@@ -330,10 +330,6 @@ db.run(`CREATE TABLE IF NOT EXISTS transactions (
 const userState = {};
 logger.info('User state initialized');
 
-let qrisHistoryBlockedUntil = 0;
-let qrisHistoryLastRequest = 0;
-const QRIS_HISTORY_INTERVAL = 30000;
-
 bot.command(['start', 'menu'], async (ctx) => {
   logger.info('Start or Menu command received');
   
@@ -4281,57 +4277,12 @@ async function checkQRISStatus() {
 
   const now = Date.now();
 
-  let orkutList = null;
-
-  // ORKUT: ambil history sekali saja, jangan spam per pending
-  if (vars.PAYMENT === "ORKUT") {
-    if (now < qrisHistoryBlockedUntil) return;
-    if (now - qrisHistoryLastRequest < QRIS_HISTORY_INTERVAL) return;
-    qrisHistoryLastRequest = now;
-
-    try {
-      const params = new URLSearchParams();
-      params.append('username', AUTH_USER);
-      params.append('token', AUTH_TOKEN);
-      params.append('jenis', 'masuk');
-
-      const res = await axios.post(
-        'https://orkut.rajaserver.web.id/api/orkut/qris-history',
-        params,
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': '*/*'
-          },
-          timeout: 15000
-        }
-      );
-
-      const data = res.data;
-      if (!data?.success || !data.qris_history?.results) {
-        logger.warn('[QRIS] Response history tidak valid');
-        return;
-      }
-
-      orkutList = data.qris_history.results;
-    } catch (err) {
-      const apiMessage = String(err?.response?.data?.message || err?.message || '');
-      logger.error(`[QRIS] ERROR history: ${apiMessage}`);
-
-      if (apiMessage.toLowerCase().includes('terlalu sering membuka menu qris merchant')) {
-        qrisHistoryBlockedUntil = Date.now() + (5 * 60 * 1000);
-        logger.warn('[QRIS] ORKUT rate limit aktif, polling dihentikan 5 menit');
-      }
-      return;
-    }
-  }
-
   for (const [uniqueCode, deposit] of Object.entries(global.pendingDeposits)) {
     if (deposit.status !== 'pending') continue;
 
     try {
-      let maxAge = vars.PAYMENT === "GOPAY" ? 15 * 60 * 1000 : 3600 * 1000;
-
+      // EXPIRATION
+      let maxAge = vars.PAYMENT === "GOPAY" ? 15 * 60 * 1000 : 3600 * 1000; // 15 menit vs 1 jam
       if (now - deposit.timestamp > maxAge) {
         logger.warn(`EXPIRED ${uniqueCode}`);
         delete global.pendingDeposits[uniqueCode];
@@ -4339,7 +4290,9 @@ async function checkQRISStatus() {
         continue;
       }
 
+      // PROVIDER-SPECIFIC LOGIC
       if (vars.PAYMENT === "GOPAY") {
+        // Cek status via API GoPay
         const res = await axios.post(
           "https://api-gopay.sawargipay.cloud/qris/status",
           { transaction_id: deposit.transactionId },
@@ -4368,12 +4321,35 @@ async function checkQRISStatus() {
         }
 
       } else if (vars.PAYMENT === "ORKUT") {
-        if (!Array.isArray(orkutList)) continue;
+        // Cek status via API Orkut
+        const params = new URLSearchParams();
+        params.append('username', AUTH_USER);
+        params.append('token', AUTH_TOKEN);
+        params.append('jenis', 'masuk');
 
+        const res = await axios.post(
+          'https://orkut.rajaserver.web.id/api/orkut/qris-history',
+          params,
+          {
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Accept': '*/*'
+            },
+            timeout: 15000
+          }
+        );
+
+        const data = res.data;
+        if (!data?.success || !data.qris_history?.results) {
+          logger.warn(`[QRIS] Response tidak valid ${uniqueCode}`);
+          continue;
+        }
+
+        const list = data.qris_history.results;
         const normalize = v => Number(String(v || '').replace(/[^\d]/g, '')) || 0;
         const targetAmount = normalize(deposit.amount);
 
-        const match = orkutList.find(tx => {
+        const match = list.find(tx => {
           const kredit = normalize(tx.kredit);
           const status = String(tx.status || '').toUpperCase();
           return kredit === targetAmount && status === 'IN';

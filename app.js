@@ -214,60 +214,23 @@ const db = new sqlite3.Database('./sellvpn.db', (err) => {
   }
 });
 
-function dbRunAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) return reject(err);
-      resolve(this);
-    });
-  });
-}
-
-function dbAllAsync(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) return reject(err);
-      resolve(rows);
-    });
-  });
-}
-
-async function ensurePendingDepositsSchema() {
-  try {
-    await dbRunAsync(`CREATE TABLE IF NOT EXISTS pending_deposits (
-      unique_code TEXT PRIMARY KEY,
-      user_id INTEGER,
-      amount INTEGER,
-      original_amount INTEGER,
-      timestamp INTEGER,
-      status TEXT,
-      qr_message_id INTEGER
-    )`);
-
-    const columns = await dbAllAsync(`PRAGMA table_info(pending_deposits)`);
-    const existing = new Set(columns.map(col => String(col.name).toLowerCase()));
-
-    if (!existing.has('purpose')) {
-      await dbRunAsync(`ALTER TABLE pending_deposits ADD COLUMN purpose TEXT DEFAULT 'deposit'`);
-      logger.info('Kolom purpose berhasil ditambahkan ke pending_deposits');
-    }
-
-    if (!existing.has('payload')) {
-      await dbRunAsync(`ALTER TABLE pending_deposits ADD COLUMN payload TEXT`);
-      logger.info('Kolom payload berhasil ditambahkan ke pending_deposits');
-    }
-
-    if (!existing.has('transaction_id')) {
-      await dbRunAsync(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`);
-      logger.info('Kolom transaction_id berhasil ditambahkan ke pending_deposits');
-    }
-
-    logger.info('Migrasi pending_deposits selesai');
-  } catch (err) {
-    logger.error('Gagal migrasi pending_deposits:', err.message);
-    throw err;
+db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
+  unique_code TEXT PRIMARY KEY,
+  user_id INTEGER,
+  amount INTEGER,
+  original_amount INTEGER,
+  timestamp INTEGER,
+  status TEXT,
+  qr_message_id INTEGER
+)`, (err) => {
+  if (err) {
+    logger.error('Kesalahan membuat tabel pending_deposits:', err.message);
   }
-}
+});
+
+db.run(`ALTER TABLE pending_deposits ADD COLUMN purpose TEXT DEFAULT 'deposit'`, () => {});
+db.run(`ALTER TABLE pending_deposits ADD COLUMN payload TEXT`, () => {});
+db.run(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`, () => {});
 
 db.run(`CREATE TABLE IF NOT EXISTS Server (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4024,34 +3987,30 @@ global.pendingDeposits = {};
 let lastRequestTime = 0;
 const requestInterval = 1000; 
 
-async function initializePendingDepositsCache() {
-  try {
-    await ensurePendingDepositsSchema();
-
-    const rows = await dbAllAsync('SELECT * FROM pending_deposits WHERE status = ?', ['pending']);
-    global.pendingDeposits = {};
-
-    rows.forEach(row => {
-      global.pendingDeposits[row.unique_code] = {
-        amount: row.amount,
-        originalAmount: row.original_amount,
-        userId: row.user_id,
-        timestamp: row.timestamp,
-        status: row.status,
-        qrMessageId: row.qr_message_id,
-        purpose: row.purpose || 'deposit',
-        payload: row.payload || null,
-        transactionId: row.transaction_id || null
-      };
-    });
-
-    logger.info(`Pending deposit loaded: ${Object.keys(global.pendingDeposits).length}`);
-  } catch (err) {
-    logger.error('Gagal initialize pending_deposits cache:', err.message);
+db.all('SELECT * FROM pending_deposits WHERE status = "pending"', [], (err, rows) => {
+  if (err) {
+    logger.error('Gagal load pending_deposits:', err.message);
+    return;
   }
-}
-
-initializePendingDepositsCache();
+  rows.forEach(row => {
+    global.pendingDeposits[row.unique_code] = {
+      amount: row.amount,
+      originalAmount: row.original_amount,
+      userId: row.user_id,
+      timestamp: row.timestamp,
+      status: row.status,
+      qrMessageId: row.qr_message_id,
+      purpose: row.purpose || 'deposit',
+      payload: row.payload || null,
+      transactionId: row.transaction_id || null,
+      retryCount: 0,
+      providerErrorCount: 0,
+      lastErrorAt: 0,
+      nextPollMs: 5000
+    };
+  });
+  logger.info('Pending deposit loaded:', Object.keys(global.pendingDeposits).length);
+});
 
 function generateRandomNumber(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -4087,6 +4046,24 @@ async function safeSendToUser(userId, text, extra = {}) {
     }
   }
 }
+
+function removePendingDeposit(uniqueCode) {
+  try {
+    if (global.pendingDeposits && global.pendingDeposits[uniqueCode]) {
+      delete global.pendingDeposits[uniqueCode];
+    }
+    db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode], () => {});
+  } catch (e) {
+    logger.error(`Gagal menghapus pending deposit ${uniqueCode}: ${e.message}`);
+  }
+}
+
+function getDepositCooldownMs(deposit) {
+  if (!deposit || !deposit.lastErrorAt || !deposit.nextPollMs) return 0;
+  const elapsed = Date.now() - deposit.lastErrorAt;
+  return Math.max(0, deposit.nextPollMs - elapsed);
+}
+
 
 function formatOrderSummary(order) {
   const actionLabel = order.action === 'create' ? 'Buat Akun' : 'Perpanjang Akun';
@@ -4136,6 +4113,21 @@ async function createServiceOrderQRIS(ctx, order) {
   let adminFee = 0;
 
   try {
+    if (!global.pendingDeposits) global.pendingDeposits = {};
+
+    // batalkan pending QRIS order lama milik user agar tidak loop terus
+    for (const [code, dep] of Object.entries(global.pendingDeposits)) {
+      if ((dep?.purpose || 'deposit') === 'service_order' && Number(dep?.userId) === Number(userId)) {
+        removePendingDeposit(code);
+      }
+    }
+
+    db.run(
+      'DELETE FROM pending_deposits WHERE user_id = ? AND status = ? AND purpose = ?',
+      [userId, 'pending', 'service_order'],
+      () => {}
+    );
+
     let transactionId = null;
     let qrMessage = null;
 
@@ -4183,7 +4175,6 @@ async function createServiceOrderQRIS(ctx, order) {
       throw new Error('PAYMENT tidak valid');
     }
 
-    if (!global.pendingDeposits) global.pendingDeposits = {};
     global.pendingDeposits[uniqueCode] = {
       amount: finalAmount,
       originalAmount: Number(order.totalHarga),
@@ -4193,7 +4184,11 @@ async function createServiceOrderQRIS(ctx, order) {
       qrMessageId: qrMessage?.message_id,
       transactionId,
       purpose: 'service_order',
-      payload: JSON.stringify(order)
+      payload: JSON.stringify(order),
+      retryCount: 0,
+      providerErrorCount: 0,
+      lastErrorAt: 0,
+      nextPollMs: 5000
     };
 
     db.run(
@@ -4222,6 +4217,7 @@ async function createServiceOrderQRIS(ctx, order) {
   }
 }
 
+async function executeServiceOrder(order, opts = {}) {
 async function executeServiceOrder(order, opts = {}) {
   const { chargeBalance = false, paymentSource = 'saldo' } = opts;
   const userId = order.userId;
@@ -4301,14 +4297,10 @@ async function processDeposit(ctx, amount) {
   const currentTime = Date.now();
 
   if (currentTime - lastRequestTime < requestInterval) {
-    try {
-      await ctx.editMessageText(
-        '⚠️ *Terlalu banyak request, tunggu dulu ya.*',
-        { parse_mode: 'Markdown' }
-      );
-    } catch (e) {
-      await safeReplyMessage(ctx, '⚠️ *Terlalu banyak request, tunggu dulu ya.*', { parse_mode: 'Markdown' });
-    }
+    await ctx.editMessageText(
+      '⚠️ *Terlalu banyak request, tunggu dulu ya.*',
+      { parse_mode: 'Markdown' }
+    );
     return;
   }
 
@@ -4496,19 +4488,26 @@ async function checkQRISStatus() {
   for (const [uniqueCode, deposit] of Object.entries(global.pendingDeposits)) {
     if (deposit.status !== 'pending') continue;
 
+    const cooldownMs = getDepositCooldownMs(deposit);
+    if (cooldownMs > 0) continue;
+
     try {
       // EXPIRATION
-      let maxAge = vars.PAYMENT === "GOPAY" ? 15 * 60 * 1000 : 3600 * 1000; // 15 menit vs 1 jam
+      let maxAge = vars.PAYMENT === "GOPAY" ? 15 * 60 * 1000 : 3600 * 1000;
+      if ((deposit.purpose || 'deposit') === 'service_order') {
+        maxAge = 10 * 60 * 1000;
+      }
+
       if (now - deposit.timestamp > maxAge) {
         logger.warn(`EXPIRED ${uniqueCode}`);
-        delete global.pendingDeposits[uniqueCode];
-        db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+        if ((deposit.purpose || 'deposit') === 'service_order') {
+          await safeSendToUser(deposit.userId, '⏰ QRIS order sudah expired. Silakan buat pesanan baru.');
+        }
+        removePendingDeposit(uniqueCode);
         continue;
       }
 
-      // PROVIDER-SPECIFIC LOGIC
       if (vars.PAYMENT === "GOPAY") {
-        // Cek status via API GoPay
         const res = await axios.post(
           "https://api-gopay.sawargipay.cloud/qris/status",
           { transaction_id: deposit.transactionId },
@@ -4533,12 +4532,10 @@ async function checkQRISStatus() {
         db.run('UPDATE pending_deposits SET status = ? WHERE unique_code = ?', ['processing', uniqueCode]);
         const success = await processMatchingPayment(deposit, data, uniqueCode);
         if (!success) {
-          delete global.pendingDeposits[uniqueCode];
-          db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+          removePendingDeposit(uniqueCode);
         }
 
       } else if (vars.PAYMENT === "ORKUT") {
-        // Cek status via API Orkut
         const params = new URLSearchParams();
         params.append('username', AUTH_USER);
         params.append('token', AUTH_TOKEN);
@@ -4559,6 +4556,8 @@ async function checkQRISStatus() {
         const data = res.data;
         if (!data?.success || !data.qris_history?.results) {
           logger.warn(`[QRIS] Response tidak valid ${uniqueCode}`);
+          deposit.lastErrorAt = Date.now();
+          deposit.nextPollMs = 15000;
           continue;
         }
 
@@ -4574,6 +4573,10 @@ async function checkQRISStatus() {
 
         if (!match) {
           logger.info(`[QRIS] Belum match ${uniqueCode}`);
+          deposit.retryCount = 0;
+          deposit.providerErrorCount = 0;
+          deposit.lastErrorAt = 0;
+          deposit.nextPollMs = 5000;
           continue;
         }
 
@@ -4584,18 +4587,38 @@ async function checkQRISStatus() {
         if (success) {
           logger.info(`[QRIS] SUCCESS ${uniqueCode}`);
         } else {
-          delete global.pendingDeposits[uniqueCode];
-          db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+          removePendingDeposit(uniqueCode);
         }
       }
 
     } catch (err) {
-      logger.error(`[QRIS] ERROR ${uniqueCode}: ${err.message}`);
+      const statusCode = err?.response?.status || 0;
+      const errMsg = err?.message || 'Unknown error';
+
+      deposit.retryCount = Number(deposit.retryCount || 0) + 1;
+      deposit.lastErrorAt = Date.now();
+
+      if (statusCode === 469) {
+        deposit.providerErrorCount = Number(deposit.providerErrorCount || 0) + 1;
+        deposit.nextPollMs = Math.min(60000, 15000 * deposit.providerErrorCount);
+      } else {
+        deposit.nextPollMs = Math.min(30000, 5000 * deposit.retryCount);
+      }
+
+      logger.error(`[QRIS] ERROR ${uniqueCode}: ${errMsg}`);
+
+      if ((deposit.purpose || 'deposit') === 'service_order' && statusCode === 469 && deposit.providerErrorCount >= 6) {
+        await safeSendToUser(
+          deposit.userId,
+          '❌ QRIS order gagal diverifikasi oleh provider. Silakan buat order QRIS baru atau gunakan pembayaran saldo.'
+        );
+        removePendingDeposit(uniqueCode);
+      }
     }
   }
 }
 
-// AUTO LOOP
+// AUTO LOOP// AUTO LOOP
 setInterval(checkQRISStatus, 5000);
 
 function keyboard_abc() {
@@ -4711,8 +4734,7 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
           if (row) {
             db.run('ROLLBACK');
             logger.info(`Transaction ${transactionKey} already processed, skipping...`);
-            delete global.pendingDeposits[uniqueCode];
-            db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+            removePendingDeposit(uniqueCode);
             resolve(true);
             return;
           }
@@ -4743,8 +4765,7 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
                   { chargeBalance: false, paymentSource: 'qris' }
                 );
 
-                delete global.pendingDeposits[uniqueCode];
-                db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+                removePendingDeposit(uniqueCode);
 
                 if (!result.success) {
                   logger.warn(`Service order QRIS gagal diproses untuk ${uniqueCode}: ${result.msg}`);
@@ -4832,8 +4853,7 @@ async function processMatchingPayment(deposit, matchingTransaction, uniqueCode) 
 
                       db.run('COMMIT');
                       global.processedTransactions.add(transactionKey);
-                      delete global.pendingDeposits[uniqueCode];
-                      db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+                      removePendingDeposit(uniqueCode);
                       resolve(true);
                     } else {
                       db.run('ROLLBACK');

@@ -1,4 +1,5 @@
 
+// modules/service-order-qris.js
 module.exports = function createServiceOrderModule(deps) {
   const {
     bot,
@@ -16,23 +17,29 @@ module.exports = function createServiceOrderModule(deps) {
     createtrojan,
     createshadowsocks,
     createssh,
+    createzivudp,
     renewvmess,
     renewvless,
     renewtrojan,
     renewshadowsocks,
-    renewssh
+    renewssh,
+    renewzivudp,
+    AUTH_USER,
+    AUTH_TOKEN,
+    GOPAY_KEY,
   } = deps;
 
   async function safeSendToUser(userId, text, extra = {}) {
     try {
       return await bot.telegram.sendMessage(userId, text, extra);
     } catch (error) {
-      logger.error(`SendMessage gagal ke ${userId}: ${error.message}`);
+      logger.error(`SendMessage gagal ke ${userId}, fallback ke plain text: ${error.message}`);
       const fallback = { ...extra };
       delete fallback.parse_mode;
       try {
         return await bot.telegram.sendMessage(userId, text, fallback);
-      } catch {
+      } catch (err2) {
+        logger.error(`Fallback sendMessage juga gagal ke ${userId}: ${err2.message}`);
         return null;
       }
     }
@@ -40,10 +47,13 @@ module.exports = function createServiceOrderModule(deps) {
 
   function formatOrderSummary(order) {
     const actionLabel = order.action === 'create' ? 'Buat Akun' : 'Perpanjang Akun';
+    const typeLabel = order.type === 'zivudp' ? 'ZIV UDP' : String(order.type || '').toUpperCase();
+    const usernameLine = order.username ? `👤 Username: ${order.username}\n` : '';
+    const expLine = order.exp ? `📅 Masa aktif: ${order.exp} hari\n` : '';
     return `🧾 Detail Pesanan\n\n` +
-      `🛠 Layanan: ${actionLabel} ${String(order.type || '').toUpperCase()}\n` +
-      `👤 Username: ${order.username}\n` +
-      `📅 Masa aktif: ${order.exp} hari\n` +
+      `🛠 Layanan: ${actionLabel} ${typeLabel}\n` +
+      usernameLine +
+      expLine +
       `🌐 Server ID: ${order.serverId}\n` +
       `💰 Total: Rp ${Number(order.totalHarga || 0).toLocaleString('id-ID')}`;
   }
@@ -56,8 +66,7 @@ module.exports = function createServiceOrderModule(deps) {
           [{ text: '💳 Bayar Saldo', callback_data: 'pay_balance' }],
           [{ text: '📷 Bayar QRIS', callback_data: 'pay_qris' }]
         ]
-      },
-      parse_mode: 'Markdown'
+      }
     });
   }
 
@@ -91,17 +100,19 @@ module.exports = function createServiceOrderModule(deps) {
         else if (type === 'trojan') msg = await createtrojan(username, exp, quota, iplimit, serverId);
         else if (type === 'shadowsocks') msg = await createshadowsocks(username, exp, quota, iplimit, serverId);
         else if (type === 'ssh') msg = await createssh(username, password, exp, iplimit, serverId);
+        else if (type === 'zivudp') msg = await createzivudp(username, password, exp, iplimit, serverId);
       } else if (action === 'renew') {
         if (type === 'vmess') msg = await renewvmess(username, exp, quota, iplimit, serverId);
         else if (type === 'vless') msg = await renewvless(username, exp, quota, iplimit, serverId);
         else if (type === 'trojan') msg = await renewtrojan(username, exp, quota, iplimit, serverId);
         else if (type === 'shadowsocks') msg = await renewshadowsocks(username, exp, quota, iplimit, serverId);
         else if (type === 'ssh') msg = await renewssh(username, exp, iplimit, serverId);
+        else if (type === 'zivudp') msg = await renewzivudp(username, exp, iplimit, serverId);
       }
 
-      if (!msg || String(msg).includes('❌')) {
+      if (!msg || msg.includes('❌')) {
         if (paymentSource === 'qris' && totalHarga > 0) {
-          await updateUserBalance(userId, totalHarga).catch(() => {});
+          await updateUserBalance(userId, totalHarga);
           await safeSendToUser(
             userId,
             `⚠️ Pembayaran QRIS berhasil, tetapi proses ${action} ${type} gagal. Dana Rp ${totalHarga.toLocaleString('id-ID')} sudah dimasukkan ke saldo Anda.\n\nDetail error:\n${msg || 'Unknown error'}`
@@ -125,7 +136,7 @@ module.exports = function createServiceOrderModule(deps) {
         `${action === 'create' ? '📢' : '♻️'} <b>${action === 'create' ? 'Account Created' : 'Account Renewed'}</b>\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `👤 <b>User:</b> ${userInfo.first_name || userId} (${userId})\n` +
-        `🧾 <b>Type:</b> ${String(type).toUpperCase()}\n` +
+        `🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : String(type).toUpperCase()}\n` +
         `📛 <b>Username:</b> ${maskedUsername}\n` +
         `📆 <b>Expired:</b> ${exp || '0'}\n` +
         `🌐 <b>Server ID:</b> ${serverId}\n` +
@@ -169,29 +180,53 @@ module.exports = function createServiceOrderModule(deps) {
         await removePendingByPrefix(userId, 'order-');
       }
 
-      const res = await axios.get('https://orkut.rajaserver.web.id/api/qris', {
-        params: { qris_string: vars.DATA_QRIS_ORKUT, amount: Number(order.totalHarga), format: 'json' },
-        timeout: 15000
-      });
-      const data = res.data;
-      if (!data || !data.success) throw new Error('Gagal create QRIS ORKUT');
+      let transactionId = null;
+      let qrMessage = null;
 
-      finalAmount = Number(data.amount);
-      adminFee = Number(data.random_add);
-      const transactionId = data.reference;
-      const base64Data = String(data.image_data || '').split(',')[1];
-      if (!base64Data) throw new Error('QRIS image invalid');
-
-      const imageBuffer = Buffer.from(base64Data, 'base64');
-      const caption = formatOrderSummary(order) + `\n\n💰 Total bayar: Rp ${finalAmount.toLocaleString('id-ID')}\n` +
-        (adminFee > 0 ? `🧾 Biaya admin: Rp ${adminFee.toLocaleString('id-ID')}\n` : '') +
-        `⏱️ Expired: 10 menit\n⚠️ Transfer harus sama persis!`;
-
-      const qrMessage = await ctx.replyWithPhoto({ source: imageBuffer }, {
-        caption,
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [[{ text: '❌ Batal', callback_data: `batal_topup_${uniqueCode}` }]] }
-      });
+      if (vars.PAYMENT === 'GOPAY') {
+        const res = await axios.post(
+          'https://api-gopay.sawargipay.cloud/qris/generate',
+          { amount: finalAmount },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${GOPAY_KEY}`
+            },
+            timeout: 15000
+          }
+        );
+        if (!res.data?.success) throw new Error('Gagal create QRIS GOPAY');
+        const data = res.data.data;
+        transactionId = data.transaction_id;
+        const safeQrUrl = encodeURI(String(data.qr_url || '').trim());
+        const caption = formatOrderSummary(order) +
+          `\n\n💰 Total bayar: Rp ${finalAmount.toLocaleString('id-ID')}\n⏱️ Expired: 10 menit\n⚠️ Transfer harus sama persis!\n\n🔗 Klik QRIS: ${safeQrUrl}`;
+        qrMessage = await safeReplyMessage(ctx, caption, {
+          reply_markup: { inline_keyboard: [[{ text: '❌ Batal', callback_data: `batal_topup_${uniqueCode}` }]] }
+        });
+      } else if (vars.PAYMENT === 'ORKUT') {
+        const res = await axios.get('https://orkut.rajaserver.web.id/api/qris', {
+          params: { qris_string: vars.DATA_QRIS_ORKUT, amount: Number(order.totalHarga), format: 'json' },
+          timeout: 15000
+        });
+        const data = res.data;
+        if (!data || !data.success) throw new Error('Gagal create QRIS ORKUT');
+        finalAmount = Number(data.amount);
+        adminFee = Number(data.random_add);
+        transactionId = data.reference;
+        const base64Data = String(data.image_data || '').split(',')[1];
+        if (!base64Data) throw new Error('QRIS image invalid');
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        const caption = formatOrderSummary(order) + `\n\n💰 Total bayar: Rp ${finalAmount.toLocaleString('id-ID')}\n` +
+          (adminFee > 0 ? `🧾 Biaya admin: Rp ${adminFee.toLocaleString('id-ID')}\n` : '') +
+          `⏱️ Expired: 10 menit\n⚠️ Transfer harus sama persis!`;
+        qrMessage = await ctx.replyWithPhoto({ source: imageBuffer }, {
+          caption,
+          reply_markup: { inline_keyboard: [[{ text: '❌ Batal', callback_data: `batal_topup_${uniqueCode}` }]] }
+        });
+      } else {
+        throw new Error('PAYMENT tidak valid');
+      }
 
       if (!global.pendingDeposits) global.pendingDeposits = {};
       global.pendingDeposits[uniqueCode] = {
@@ -235,6 +270,8 @@ module.exports = function createServiceOrderModule(deps) {
   return {
     sendPaymentMethodPrompt,
     createServiceOrderQRIS,
-    executeServiceOrder
+    executeServiceOrder,
+    safeSendToUser,
+    formatOrderSummary,
   };
 };

@@ -4170,7 +4170,7 @@ async function createServiceOrderQRIS(ctx, order) {
     );
 
     delete userState[ctx.chat.id];
-    try { await ctx.deleteMessage(); } catch {}
+    try { await ctx.deleteMessage(); } catch (e) {}
   } catch (error) {
     logger.error(`QRIS order error: ${error.message}`);
     await safeReplyMessage(ctx, `❌ Gagal membuat QRIS order.\n⚠️ Detail: ${error.message}`);
@@ -4256,10 +4256,14 @@ async function processDeposit(ctx, amount) {
   const currentTime = Date.now();
 
   if (currentTime - lastRequestTime < requestInterval) {
-    await ctx.editMessageText(
-      '⚠️ *Terlalu banyak request, tunggu dulu ya.*',
-      { parse_mode: 'Markdown' }
-    );
+    try {
+      await ctx.editMessageText(
+        '⚠️ *Terlalu banyak request, tunggu dulu ya.*',
+        { parse_mode: 'Markdown' }
+      );
+    } catch {
+      await safeReplyMessage(ctx, '⚠️ *Terlalu banyak request, tunggu dulu ya.*', { parse_mode: 'Markdown' });
+    }
     return;
   }
 
@@ -4425,7 +4429,7 @@ async function processDeposit(ctx, amount) {
     // bersihin state lama
     if (global.depositState?.[userId]) delete global.depositState[userId];
 
-    try { await ctx.deleteMessage(); } catch {}
+    try { await ctx.deleteMessage(); } catch (e) {}
 
   } catch (error) {
     console.error("❌ Deposit error:", error.message);

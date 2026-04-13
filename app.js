@@ -4218,7 +4218,6 @@ async function createServiceOrderQRIS(ctx, order) {
 }
 
 async function executeServiceOrder(order, opts = {}) {
-async function executeServiceOrder(order, opts = {}) {
   const { chargeBalance = false, paymentSource = 'saldo' } = opts;
   const userId = order.userId;
   const action = order.action;

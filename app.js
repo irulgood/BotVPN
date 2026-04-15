@@ -366,6 +366,19 @@ db.run(`CREATE TABLE IF NOT EXISTS transactions (
 const userState = {};
 logger.info('User state initialized');
 
+
+function getServiceTypeLabel(type) {
+  const labels = {
+    ssh: 'SSH / OVPN',
+    vmess: 'VMESS',
+    vless: 'VLESS',
+    trojan: 'TROJAN',
+    shadowsocks: 'SHADOWSOCKS'
+  };
+  return labels[type] || String(type || '').toUpperCase() || '-';
+}
+
+
 bot.command(['start', 'menu'], async (ctx) => {
   logger.info('Start or Menu command received');
   

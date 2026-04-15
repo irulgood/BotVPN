@@ -2427,7 +2427,10 @@ if (state.step?.startsWith('username_fix_')) {
     await ctx.reply(`🛠️ *FIX ACCOUNT* (${fixTypeLabel})\n👤 Username: \`${username}\`\n\n1) 🔒 Lock...`, { parse_mode: 'Markdown' });
 
     // 1) LOCK
-    const lockMsg = await lockFns[type](username, password, exp, iplimit, serverId);
+    const rawLockMsg = await lockFns[type](username, password, exp, iplimit, serverId);
+    const lockMsg = type === 'zivudp'
+      ? String(rawLockMsg || '').replace(/\bSSH\b/gi, 'ZIV UDP')
+      : rawLockMsg;
 
     // Delay (boleh kamu ubah 2-10 detik)
     await sleep(3000);
@@ -2435,7 +2438,10 @@ if (state.step?.startsWith('username_fix_')) {
     await ctx.reply(`2) 🔓 Unlock...`, { parse_mode: 'Markdown' });
 
     // 2) UNLOCK
-    const unlockMsg = await unlockFns[type](username, password, exp, iplimit, serverId);
+    const rawUnlockMsg = await unlockFns[type](username, password, exp, iplimit, serverId);
+    const unlockMsg = type === 'zivudp'
+      ? String(rawUnlockMsg || '').replace(/\bSSH\b/gi, 'ZIV UDP')
+      : rawUnlockMsg;
 
     // Output final (biar jelas hasilnya)
     const finalMsg =

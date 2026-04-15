@@ -1150,7 +1150,8 @@ async function handleServiceAction(ctx, action) {
     keyboard = [
       [{ text: 'Fix Ssh/Ovpn', callback_data: 'fix_ssh' }],      
       [{ text: 'Fix Vmess', callback_data: 'fix_vmess' }, { text: 'Fix Vless', callback_data: 'fix_vless' }],
-      [{ text: 'Fix Trojan', callback_data: 'fix_trojan' }, { text: '🔙 Kembali', callback_data: 'send_main_menu' }],
+      [{ text: 'Fix Trojan', callback_data: 'fix_trojan' }, { text: 'Fix ZIV UDP', callback_data: 'fix_zivudp' }],
+      [{ text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } 
   try {
@@ -1789,6 +1790,13 @@ bot.action('fix_trojan', async (ctx) => {
   }
   await startSelectServer(ctx, 'fix', 'trojan');
 });
+
+bot.action('fix_zivudp', async (ctx) => {
+  if (!ctx || !ctx.match) {
+    return ctx.reply('❌ *GAGAL!* Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi nanti.', { parse_mode: 'Markdown' });
+  }
+  await startSelectServer(ctx, 'fix', 'zivudp');
+});
 //UNLOCK
 bot.action('unlock_ssh', async (ctx) => {
   if (!ctx || !ctx.match) {
@@ -2173,7 +2181,7 @@ bot.action(/(changelimip)_username_(vmess|vless|trojan|shadowsocks|ssh)_(.+)/, a
   };
   await ctx.reply('👤 *Masukkan username yang ingin ganti limit ip:*', { parse_mode: 'Markdown' });
 });
-bot.action(/(fix)_username_(vmess|vless|trojan|shadowsocks|ssh)_(.+)/, async (ctx) => {
+bot.action(/(fix)_username_(vmess|vless|trojan|shadowsocks|ssh|zivudp)_(.+)/, async (ctx) => {
   const [action, type, serverId] = [ctx.match[1], ctx.match[2], ctx.match[3]];
 
   userState[ctx.chat.id] = {
@@ -2398,7 +2406,8 @@ if (state.step?.startsWith('username_fix_')) {
       vless: lockvless,
       trojan: locktrojan,
       shadowsocks: lockshadowsocks,
-      ssh: lockssh
+      ssh: lockssh,
+      zivudp: lockssh
     };
 
     const unlockFns = {
@@ -2406,14 +2415,16 @@ if (state.step?.startsWith('username_fix_')) {
       vless: unlockvless,
       trojan: unlocktrojan,
       shadowsocks: unlockshadowsocks,
-      ssh: unlockssh
+      ssh: unlockssh,
+      zivudp: unlockssh
     };
 
     if (!lockFns[type] || !unlockFns[type]) {
       return ctx.reply('❌ *Tipe akun tidak dikenali.*', { parse_mode: 'Markdown' });
     }
 
-    await ctx.reply(`🛠️ *FIX ACCOUNT* (${type.toUpperCase()})\n👤 Username: \`${username}\`\n\n1) 🔒 Lock...`, { parse_mode: 'Markdown' });
+    const fixTypeLabel = type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase();
+    await ctx.reply(`🛠️ *FIX ACCOUNT* (${fixTypeLabel})\n👤 Username: \`${username}\`\n\n1) 🔒 Lock...`, { parse_mode: 'Markdown' });
 
     // 1) LOCK
     const lockMsg = await lockFns[type](username, password, exp, iplimit, serverId);
@@ -2430,7 +2441,7 @@ if (state.step?.startsWith('username_fix_')) {
     const finalMsg =
       `✅ *FIX SELESAI*\n` +
       `👤 Username: \`${username}\`\n` +
-      `🧩 Type: *${type.toUpperCase()}*\n` +
+      `🧩 Type: *${fixTypeLabel}*\n` +
       `🖥 Server: \`${serverId}\`\n\n` +
       `🔒 *LOCK RESULT:*\n${lockMsg}\n\n` +
       `🔓 *UNLOCK RESULT:*\n${unlockMsg}`;

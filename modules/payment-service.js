@@ -52,6 +52,36 @@ function createPaymentEngine(options) {
   let last429LogAt = 0;
   let orkutHistoryErrorCount = 0;
   let intervalHandle = null;
+  let lastGroupCooldownNoticeUntil = 0;
+
+  async function notifyGroupAboutCooldown(blockedUntil = 0, pendingTopupCount = 0, pendingServiceCount = 0) {
+    if (!blockedUntil) return;
+    if (Number(lastGroupCooldownNoticeUntil || 0) >= Number(blockedUntil)) return;
+
+    lastGroupCooldownNoticeUntil = Number(blockedUntil);
+    const blockedUntilText = formatBlockedUntilWib(blockedUntil);
+    const totalPending = Number(pendingTopupCount || 0) + Number(pendingServiceCount || 0);
+
+    await GROUP_SENDER(
+      `⚠️ <b>QRIS PROVIDER RATE LIMIT</b>
+━━━━━━━━━━━━━━━━━━━━
+` +
+      `🕒 <b>Cooldown sampai:</b> ${blockedUntilText} WIB
+` +
+      `⏳ <b>Durasi cooldown:</b> 5 menit
+` +
+      `💰 <b>Pending top up:</b> ${pendingTopupCount}
+` +
+      `🧾 <b>Pending pembayaran layanan:</b> ${pendingServiceCount}
+` +
+      `📦 <b>Total pending:</b> ${totalPending}
+` +
+      `━━━━━━━━━━━━━━━━━━━━
+` +
+      `Bot akan menunda pengecekan pembayaran dan menolak pembuatan QRIS baru sampai cooldown selesai.`,
+      { parse_mode: 'HTML' }
+    );
+  }
 
   function dbRunAsync(query, params = []) {
     return new Promise((resolve, reject) => {
@@ -117,10 +147,43 @@ function createPaymentEngine(options) {
     };
   }
 
+  function formatBlockedUntilWib(blockedUntil) {
+    return new Date(blockedUntil).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+  }
+
+  async function guardNewOrkutQrisRequest(ctx, purposeLabel = 'transaksi QRIS') {
+    if (vars.PAYMENT !== 'ORKUT') return true;
+
+    const cooldownInfo = getActiveHistoryCooldownInfo();
+    if (!cooldownInfo.isActive) return true;
+
+    const waitMinutes = Math.max(1, Math.ceil(cooldownInfo.remainingMs / 60000));
+    const blockedUntilText = formatBlockedUntilWib(cooldownInfo.blockedUntil);
+    const alertText = `⚠️ Provider QRIS sedang rate limit. Coba lagi sekitar ${waitMinutes} menit lagi.`;
+    const replyText =
+      `⚠️ *Pembuatan ${purposeLabel} ditunda sementara karena provider QRIS sedang rate limit.*
+
+` +
+      `🕒 Coba lagi sekitar: *${blockedUntilText}* WIB
+` +
+      `⏳ Estimasi tunggu: *${waitMinutes} menit*
+
+` +
+      `Mohon jangan buat QRIS baru dulu sampai cooldown selesai.`;
+
+    if (ctx?.answerCbQuery) {
+      await ctx.answerCbQuery(alertText, { show_alert: true }).catch(() => {});
+    }
+    if (ctx?.reply) {
+      await ctx.reply(replyText, { parse_mode: 'Markdown' }).catch(() => {});
+    }
+    return false;
+  }
+
   async function notifyPendingUsersAboutCooldown(pendingEntries = [], pendingServiceEntries = [], blockedUntil = 0) {
     if (!blockedUntil) return;
 
-    const blockedUntilText = new Date(blockedUntil).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    const blockedUntilText = formatBlockedUntilWib(blockedUntil);
 
     for (const [uniqueCode, deposit] of pendingEntries) {
       if (!deposit || deposit.status !== 'pending') continue;
@@ -389,6 +452,8 @@ function createPaymentEngine(options) {
 
       if (statusCode === 429) {
         const blockedUntil = Date.now() + qrisHistory429CooldownMs;
+        const pendingTopupCount = Object.values(global.pendingDeposits || {}).filter(item => item && item.status === 'pending').length;
+        const pendingServiceCount = Object.values(global.pendingServicePayments || {}).filter(item => item && item.status === 'pending').length;
         last429LogAt = Date.now();
         setSharedHistoryState({
           lastFetchAt: Date.now(),
@@ -399,6 +464,7 @@ function createPaymentEngine(options) {
           `[QRIS] ORKUT history kena limit (429). Cooldown 5 menit aktif sampai ` +
           `${new Date(blockedUntil).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`
         );
+        await notifyGroupAboutCooldown(blockedUntil, pendingTopupCount, pendingServiceCount);
       } else {
         setSharedHistoryState({
           lastFetchAt: Date.now(),
@@ -677,6 +743,10 @@ function createPaymentEngine(options) {
       return false;
     }
 
+    if (!(await guardNewOrkutQrisRequest(ctx, 'QRIS pembayaran layanan'))) {
+      return false;
+    }
+
     lastDepositRequestByUser.set(userId, currentTime);
 
     const uniqueCode = `service-${order.action}-${order.type}-${userId}-${Date.now()}`;
@@ -946,6 +1016,10 @@ function createPaymentEngine(options) {
       return;
     }
 
+    if (!(await guardNewOrkutQrisRequest(ctx, 'QRIS top up'))) {
+      return;
+    }
+
     lastDepositRequestByUser.set(userId, currentTime);
 
     const uniqueCode = `user-${userId}-${Date.now()}`;
@@ -1101,20 +1175,21 @@ function createPaymentEngine(options) {
       for (const [uniqueCode, deposit] of pendingEntries) {
         try {
           const maxAge = 2 * 60 * 1000;
-          if (now - deposit.timestamp > maxAge) {
-            logger.warn(`EXPIRED ${uniqueCode}`);
-            await tryDeleteTelegramMessage(deposit.userId, deposit.qrMessageId);
-            await bot.telegram.sendMessage(
-              deposit.userId,
-              '⌛ QRIS topup sudah expired. Silakan buat topup baru.',
-              { parse_mode: 'Markdown' }
-            ).catch(() => {});
-            delete global.pendingDeposits[uniqueCode];
-            db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
-            continue;
-          }
 
           if (vars.PAYMENT === 'GOPAY') {
+            if (now - deposit.timestamp > maxAge) {
+              logger.warn(`EXPIRED ${uniqueCode}`);
+              await tryDeleteTelegramMessage(deposit.userId, deposit.qrMessageId);
+              await bot.telegram.sendMessage(
+                deposit.userId,
+                '⌛ QRIS topup sudah expired. Silakan buat topup baru.',
+                { parse_mode: 'Markdown' }
+              ).catch(() => {});
+              delete global.pendingDeposits[uniqueCode];
+              db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+              continue;
+            }
+
             const res = await axios.post(
               'https://api-gopay.sawargipay.cloud/qris/status',
               { transaction_id: deposit.transactionId },
@@ -1148,18 +1223,36 @@ function createPaymentEngine(options) {
             return kredit === targetAmount && ['IN', 'SUCCESS', 'PAID'].includes(status);
           });
 
-          if (!match) {
-            logger.info(`[QRIS] Belum match ${uniqueCode}`);
+          if (match) {
+            usedHistoryKeys.add(buildHistoryMatchKey(match));
+            const success = await processMatchingPayment(deposit, match, uniqueCode);
+            if (success) {
+              logger.info(`[QRIS] SUCCESS ${uniqueCode}`);
+              delete global.pendingDeposits[uniqueCode];
+              db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+            }
             continue;
           }
 
-          usedHistoryKeys.add(buildHistoryMatchKey(match));
-          const success = await processMatchingPayment(deposit, match, uniqueCode);
-          if (success) {
-            logger.info(`[QRIS] SUCCESS ${uniqueCode}`);
+          if (cooldownInfo.isActive) {
+            logger.info(`[QRIS] Pending ${uniqueCode} dipertahankan karena history masih cooldown.`);
+            continue;
+          }
+
+          if (now - deposit.timestamp > maxAge) {
+            logger.warn(`EXPIRED ${uniqueCode}`);
+            await tryDeleteTelegramMessage(deposit.userId, deposit.qrMessageId);
+            await bot.telegram.sendMessage(
+              deposit.userId,
+              '⌛ QRIS topup sudah expired. Silakan buat topup baru.',
+              { parse_mode: 'Markdown' }
+            ).catch(() => {});
             delete global.pendingDeposits[uniqueCode];
             db.run('DELETE FROM pending_deposits WHERE unique_code = ?', [uniqueCode]);
+            continue;
           }
+
+          logger.info(`[QRIS] Belum match ${uniqueCode}`);
         } catch (error) {
           logger.error(`[QRIS] ERROR ${uniqueCode}: ${error.message}`);
         }
@@ -1168,20 +1261,21 @@ function createPaymentEngine(options) {
       for (const [uniqueCode, servicePayment] of pendingServiceEntries) {
         try {
           const maxAge = 2 * 60 * 1000;
-          if (now - servicePayment.timestamp > maxAge) {
-            logger.warn(`SERVICE PAYMENT EXPIRED ${uniqueCode}`);
-            await tryDeleteTelegramMessage(servicePayment.userId, servicePayment.qrMessageId);
-            await bot.telegram.sendMessage(
-              servicePayment.userId,
-              '⌛ QRIS pembayaran layanan sudah expired. Silakan buat pesanan baru.',
-              { parse_mode: 'Markdown' }
-            ).catch(() => {});
-            delete global.pendingServicePayments[uniqueCode];
-            db.run('DELETE FROM pending_service_payments WHERE unique_code = ?', [uniqueCode]);
-            continue;
-          }
 
           if (vars.PAYMENT === 'GOPAY') {
+            if (now - servicePayment.timestamp > maxAge) {
+              logger.warn(`SERVICE PAYMENT EXPIRED ${uniqueCode}`);
+              await tryDeleteTelegramMessage(servicePayment.userId, servicePayment.qrMessageId);
+              await bot.telegram.sendMessage(
+                servicePayment.userId,
+                '⌛ QRIS pembayaran layanan sudah expired. Silakan buat pesanan baru.',
+                { parse_mode: 'Markdown' }
+              ).catch(() => {});
+              delete global.pendingServicePayments[uniqueCode];
+              db.run('DELETE FROM pending_service_payments WHERE unique_code = ?', [uniqueCode]);
+              continue;
+            }
+
             const res = await axios.post(
               'https://api-gopay.sawargipay.cloud/qris/status',
               { transaction_id: servicePayment.transactionId },
@@ -1214,17 +1308,35 @@ function createPaymentEngine(options) {
             return kredit === targetAmount && ['IN', 'SUCCESS', 'PAID'].includes(status);
           });
 
-          if (!match) {
-            logger.info(`[QRIS] Belum match service ${uniqueCode}`);
+          if (match) {
+            usedHistoryKeys.add(buildHistoryMatchKey(match));
+            const success = await processMatchingServicePayment(servicePayment, match, uniqueCode);
+            if (success) {
+              delete global.pendingServicePayments[uniqueCode];
+              db.run('DELETE FROM pending_service_payments WHERE unique_code = ?', [uniqueCode]);
+            }
             continue;
           }
 
-          usedHistoryKeys.add(buildHistoryMatchKey(match));
-          const success = await processMatchingServicePayment(servicePayment, match, uniqueCode);
-          if (success) {
+          if (cooldownInfo.isActive) {
+            logger.info(`[QRIS] Pending service ${uniqueCode} dipertahankan karena history masih cooldown.`);
+            continue;
+          }
+
+          if (now - servicePayment.timestamp > maxAge) {
+            logger.warn(`SERVICE PAYMENT EXPIRED ${uniqueCode}`);
+            await tryDeleteTelegramMessage(servicePayment.userId, servicePayment.qrMessageId);
+            await bot.telegram.sendMessage(
+              servicePayment.userId,
+              '⌛ QRIS pembayaran layanan sudah expired. Silakan buat pesanan baru.',
+              { parse_mode: 'Markdown' }
+            ).catch(() => {});
             delete global.pendingServicePayments[uniqueCode];
             db.run('DELETE FROM pending_service_payments WHERE unique_code = ?', [uniqueCode]);
+            continue;
           }
+
+          logger.info(`[QRIS] Belum match service ${uniqueCode}`);
         } catch (error) {
           logger.error(`[QRIS] SERVICE ERROR ${uniqueCode}: ${error.message}`);
         }

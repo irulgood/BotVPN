@@ -93,7 +93,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 ────────────────────────────
 
 ✨ Terima kasih telah memperpanjang layanan kami!
-*© Telegram Bots - 2025*`;
+*© Telegram Bots - 2026*`;
 
         return resolve(msg);
       });
@@ -192,7 +192,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 ────────────────────────────
 
 ✨ Terima kasih telah memperpanjang layanan kami!
-*© Telegram Bots - 2025*`;
+*© Telegram Bots - 2026*`;
 
         return resolve(msg);
       });
@@ -291,7 +291,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 ────────────────────────────
 
 ✨ Terima kasih telah memperpanjang layanan kami!
-*© Telegram Bots - 2025*`;
+*© Telegram Bots - 2026*`;
 
         return resolve(msg);
       });
@@ -390,7 +390,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 ────────────────────────────
 
 ✨ Terima kasih telah memperpanjang layanan kami!
-*© Telegram Bots - 2025*`;
+*© Telegram Bots - 2026*`;
 
         return resolve(msg);
       });
@@ -494,7 +494,7 @@ ${errMsg}`);
 https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
 ────────────────────────
 
-*© Telegram Bots - 2025*
+*© Telegram Bots - 2026*
 ✨ Akun ZIVPN UDP berhasil diperpanjang.
 `;
         return resolve(msg);

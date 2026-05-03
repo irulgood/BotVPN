@@ -24,10 +24,17 @@ function createPaymentEngine(options) {
   const GROUP_SENDER = typeof safeGroupSend === 'function'
     ? safeGroupSend
     : async (text, extra = {}) => {
+        const gid = String(GROUP_ID || '').trim();
+        if (!gid || gid === 'undefined' || gid === 'null' || gid === '0') {
+          logger.warn('Notif grup dilewati: GROUP_ID belum diset.');
+          return false;
+        }
         try {
-          await bot.telegram.sendMessage(GROUP_ID, text, extra);
+          await bot.telegram.sendMessage(gid, text, extra);
+          return true;
         } catch (error) {
           logger.error(`Notif grup gagal: ${error.message}`);
+          return false;
         }
       };
 
@@ -97,6 +104,56 @@ function createPaymentEngine(options) {
       db.get(query, params, (err, row) => {
         if (err) return reject(err);
         resolve(row);
+      });
+    });
+  }
+
+
+  function ensurePaymentTables(callback) {
+    db.serialize(() => {
+      db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
+        unique_code TEXT PRIMARY KEY,
+        user_id INTEGER,
+        amount INTEGER,
+        original_amount INTEGER,
+        timestamp INTEGER,
+        status TEXT,
+        qr_message_id INTEGER,
+        transaction_id TEXT
+      )`, (err) => {
+        if (err) logger.error(`Kesalahan membuat tabel pending_deposits: ${err.message}`);
+      });
+
+      db.run(`CREATE TABLE IF NOT EXISTS pending_service_payments (
+        unique_code TEXT PRIMARY KEY,
+        user_id INTEGER,
+        amount INTEGER,
+        original_amount INTEGER,
+        action TEXT,
+        service_type TEXT,
+        server_id INTEGER,
+        username TEXT,
+        password TEXT,
+        exp INTEGER,
+        quota TEXT,
+        iplimit TEXT,
+        timestamp INTEGER,
+        status TEXT,
+        qr_message_id INTEGER,
+        provider_ref TEXT
+      )`, (err) => {
+        if (err) logger.error(`Kesalahan membuat tabel pending_service_payments: ${err.message}`);
+      });
+
+      db.run(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`, (err) => {
+        if (err && !String(err.message || '').includes('duplicate column')) {
+          logger.error(`Gagal menambahkan kolom transaction_id di pending_deposits: ${err.message}`);
+        }
+      });
+
+      // Barrier supaya loadPendingRows tidak jalan sebelum CREATE/ALTER selesai.
+      db.get('SELECT 1', [], () => {
+        if (typeof callback === 'function') callback();
       });
     });
   }
@@ -1158,11 +1215,12 @@ function createPaymentEngine(options) {
 
       let orkutHistoryResults = null;
       const usedHistoryKeys = new Set();
+      let cooldownInfo = { isActive: false, blockedUntil: 0, remainingMs: 0 };
 
       if (vars.PAYMENT === 'ORKUT') {
         orkutHistoryResults = await fetchOrkutQrisHistory();
 
-        const cooldownInfo = getActiveHistoryCooldownInfo();
+        cooldownInfo = getActiveHistoryCooldownInfo();
         if (cooldownInfo.isActive) {
           await notifyPendingUsersAboutCooldown(pendingEntries, pendingServiceEntries, cooldownInfo.blockedUntil);
         }
@@ -1395,10 +1453,12 @@ function createPaymentEngine(options) {
   }
 
   function init() {
-    loadPendingRows();
-    if (!intervalHandle) {
-      intervalHandle = setInterval(checkQRISStatus, qrisLoopIntervalMs);
-    }
+    ensurePaymentTables(() => {
+      loadPendingRows();
+      if (!intervalHandle) {
+        intervalHandle = setInterval(checkQRISStatus, qrisLoopIntervalMs);
+      }
+    });
   }
 
   return {

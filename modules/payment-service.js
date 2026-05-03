@@ -60,6 +60,7 @@ function createPaymentEngine(options) {
   let orkutHistoryErrorCount = 0;
   let intervalHandle = null;
   let lastGroupCooldownNoticeUntil = 0;
+  const lastPendingNoMatchLogAt = new Map();
 
   async function notifyGroupAboutCooldown(blockedUntil = 0, pendingTopupCount = 0, pendingServiceCount = 0) {
     if (!blockedUntil) return;
@@ -88,6 +89,15 @@ function createPaymentEngine(options) {
       `Bot akan menunda pengecekan pembayaran dan menolak pembuatan QRIS baru sampai cooldown selesai.`,
       { parse_mode: 'HTML' }
     );
+  }
+
+  function logNoMatch(key, message) {
+    const now = Date.now();
+    const last = Number(lastPendingNoMatchLogAt.get(key) || 0);
+    if (now - last >= 30000) {
+      lastPendingNoMatchLogAt.set(key, now);
+      logger.info(message);
+    }
   }
 
   function dbRunAsync(query, params = []) {
@@ -441,6 +451,42 @@ function createPaymentEngine(options) {
     return { ok: true, msg };
   }
 
+
+  function isOrkutRateLimitResponse(statusCode, data, err) {
+    const msg = String(
+      data?.message ||
+      data?.error ||
+      err?.response?.data?.message ||
+      err?.response?.data?.error ||
+      err?.message ||
+      ''
+    ).toLowerCase();
+    return Number(statusCode) === 429 ||
+      Number(statusCode) === 469 ||
+      msg.includes('terlalu sering') ||
+      msg.includes('rate limit') ||
+      msg.includes('too many') ||
+      msg.includes('limit');
+  }
+
+  async function activateOrkutHistoryCooldown(statusCode = 429, reason = 'rate limit') {
+    const blockedUntil = Date.now() + qrisHistory429CooldownMs;
+    const pendingTopupCount = Object.values(global.pendingDeposits || {}).filter(item => item && item.status === 'pending').length;
+    const pendingServiceCount = Object.values(global.pendingServicePayments || {}).filter(item => item && item.status === 'pending').length;
+    last429LogAt = Date.now();
+    setSharedHistoryState({
+      lastFetchAt: Date.now(),
+      blockedUntil,
+      lastStatusCode: Number(statusCode || 429)
+    });
+    logger.warn(
+      `[QRIS] ORKUT history kena limit (${statusCode || 'unknown'}: ${reason}). Cooldown 5 menit aktif sampai ` +
+      `${new Date(blockedUntil).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`
+    );
+    await notifyGroupAboutCooldown(blockedUntil, pendingTopupCount, pendingServiceCount);
+    return blockedUntil;
+  }
+
   async function fetchOrkutQrisHistory() {
     const now = Date.now();
     const sharedState = getSharedHistoryState();
@@ -491,7 +537,12 @@ function createPaymentEngine(options) {
 
       const data = res.data;
       if (!data?.success || !Array.isArray(data?.qris_history?.results)) {
-        throw new Error('Response qris-history tidak valid');
+        if (isOrkutRateLimitResponse(res.status, data)) {
+          orkutHistoryErrorCount = Math.min(orkutHistoryErrorCount + 1, 5);
+          await activateOrkutHistoryCooldown(res.status || 429, data?.message || 'response qris-history limit');
+          return null;
+        }
+        throw new Error(`Response qris-history tidak valid${data?.message ? ': ' + data.message : ''}`);
       }
 
       orkutHistoryErrorCount = 0;
@@ -507,21 +558,8 @@ function createPaymentEngine(options) {
       const statusCode = err.response?.status;
       orkutHistoryErrorCount = Math.min(orkutHistoryErrorCount + 1, 5);
 
-      if (statusCode === 429) {
-        const blockedUntil = Date.now() + qrisHistory429CooldownMs;
-        const pendingTopupCount = Object.values(global.pendingDeposits || {}).filter(item => item && item.status === 'pending').length;
-        const pendingServiceCount = Object.values(global.pendingServicePayments || {}).filter(item => item && item.status === 'pending').length;
-        last429LogAt = Date.now();
-        setSharedHistoryState({
-          lastFetchAt: Date.now(),
-          blockedUntil,
-          lastStatusCode: 429
-        });
-        logger.warn(
-          `[QRIS] ORKUT history kena limit (429). Cooldown 5 menit aktif sampai ` +
-          `${new Date(blockedUntil).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`
-        );
-        await notifyGroupAboutCooldown(blockedUntil, pendingTopupCount, pendingServiceCount);
+      if (isOrkutRateLimitResponse(statusCode, err.response?.data, err)) {
+        await activateOrkutHistoryCooldown(statusCode || 429, err.response?.data?.message || err.message || 'rate limit');
       } else {
         setSharedHistoryState({
           lastFetchAt: Date.now(),
@@ -1310,7 +1348,7 @@ function createPaymentEngine(options) {
             continue;
           }
 
-          logger.info(`[QRIS] Belum match ${uniqueCode}`);
+          logNoMatch(uniqueCode, `[QRIS] Belum match ${uniqueCode}`);
         } catch (error) {
           logger.error(`[QRIS] ERROR ${uniqueCode}: ${error.message}`);
         }
@@ -1394,7 +1432,7 @@ function createPaymentEngine(options) {
             continue;
           }
 
-          logger.info(`[QRIS] Belum match service ${uniqueCode}`);
+          logNoMatch(uniqueCode, `[QRIS] Belum match service ${uniqueCode}`);
         } catch (error) {
           logger.error(`[QRIS] SERVICE ERROR ${uniqueCode}: ${error.message}`);
         }

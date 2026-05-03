@@ -183,80 +183,74 @@ const db = new sqlite3.Database('./sellvpn.db', (err) => {
   }
 });
 
-db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
-  unique_code TEXT PRIMARY KEY,
-  user_id INTEGER,
-  amount INTEGER,
-  original_amount INTEGER,
-  timestamp INTEGER,
-  status TEXT,
-  qr_message_id INTEGER
-)`, (err) => {
-  if (err) {
-    logger.error('Kesalahan membuat tabel pending_deposits:', err.message);
-  }
-});
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
+    unique_code TEXT PRIMARY KEY,
+    user_id INTEGER,
+    amount INTEGER,
+    original_amount INTEGER,
+    timestamp INTEGER,
+    status TEXT,
+    qr_message_id INTEGER,
+    transaction_id TEXT
+  )`, (err) => {
+    if (err) logger.error(`Kesalahan membuat tabel pending_deposits: ${err.message}`);
+    else logger.info('Pending deposits table created or already exists');
+  });
 
+  db.run(`CREATE TABLE IF NOT EXISTS pending_service_payments (
+    unique_code TEXT PRIMARY KEY,
+    user_id INTEGER,
+    amount INTEGER,
+    original_amount INTEGER,
+    action TEXT,
+    service_type TEXT,
+    server_id INTEGER,
+    username TEXT,
+    password TEXT,
+    exp INTEGER,
+    quota TEXT,
+    iplimit TEXT,
+    timestamp INTEGER,
+    status TEXT,
+    qr_message_id INTEGER,
+    provider_ref TEXT
+  )`, (err) => {
+    if (err) logger.error(`Kesalahan membuat tabel pending_service_payments: ${err.message}`);
+    else logger.info('Pending service payments table created or already exists');
+  });
 
-db.run(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`, (err) => {
-  if (err && !err.message.includes('duplicate column')) {
-    logger.error('Gagal menambahkan kolom transaction_id di pending_deposits:', err.message);
-  }
-});
-
-
-db.run(`CREATE TABLE IF NOT EXISTS pending_service_payments (
-  unique_code TEXT PRIMARY KEY,
-  user_id INTEGER,
-  amount INTEGER,
-  original_amount INTEGER,
-  action TEXT,
-  service_type TEXT,
-  server_id INTEGER,
-  username TEXT,
-  password TEXT,
-  exp INTEGER,
-  quota TEXT,
-  iplimit TEXT,
-  timestamp INTEGER,
-  status TEXT,
-  qr_message_id INTEGER,
-  provider_ref TEXT
-)`, (err) => {
-  if (err) {
-    logger.error('Kesalahan membuat tabel pending_service_payments:', err.message);
-  }
-});
-
-db.run(`CREATE TABLE IF NOT EXISTS Server (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  domain TEXT,
-  auth TEXT,
-  harga INTEGER,
-  nama_server TEXT,
-  quota INTEGER,
-  iplimit INTEGER,
-  batas_create_akun INTEGER,
-  total_create_akun INTEGER,
-  is_reseller_only INTEGER DEFAULT 0
-)`, (err) => {
-  if (err) {
-    logger.error('Kesalahan membuat tabel Server:', err.message);
-  } else {
-    logger.info('Server table created or already exists');
-  }
-});
-
-db.run(
-  `ALTER TABLE Server ADD COLUMN is_reseller_only INTEGER DEFAULT 0`,
-  (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      logger.error('Gagal menambahkan kolom is_reseller_only:', err.message);
-    } else if (!err) {
-      logger.info('Kolom is_reseller_only berhasil ditambahkan');
+  db.run(`ALTER TABLE pending_deposits ADD COLUMN transaction_id TEXT`, (err) => {
+    if (err && !String(err.message || '').includes('duplicate column')) {
+      logger.error(`Gagal menambahkan kolom transaction_id di pending_deposits: ${err.message}`);
     }
-  }
-);
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS Server (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain TEXT,
+    auth TEXT,
+    harga INTEGER,
+    nama_server TEXT,
+    quota INTEGER,
+    iplimit INTEGER,
+    batas_create_akun INTEGER,
+    total_create_akun INTEGER,
+    is_reseller_only INTEGER DEFAULT 0
+  )`, (err) => {
+    if (err) {
+      logger.error(`Kesalahan membuat tabel Server: ${err.message}`);
+    } else {
+      logger.info('Server table created or already exists');
+    }
+  });
+
+  db.run(`ALTER TABLE Server ADD COLUMN is_reseller_only INTEGER DEFAULT 0`, (err) => {
+    if (err && !String(err.message || '').includes('duplicate column')) {
+      logger.error(`Gagal menambahkan kolom is_reseller_only: ${err.message}`);
+    }
+  });
+});
 
 db.run(`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4047,11 +4041,81 @@ paymentEngine = createPaymentEngine({
 });
 paymentEngine.init();
 
+
+// ============================
+// TELEGRAM POLLING WATCHDOG
+// ============================
+// Telegraf long polling kadang bisa macet saat koneksi VPS -> Telegram putus,
+// tetapi proses Node tetap hidup sehingga PM2 menganggap bot masih online.
+// Watchdog ini cek koneksi Telegram berkala. Jika gagal beberapa kali berturut-turut,
+// proses keluar dengan code 1 agar PM2 otomatis restart.
+let telegramWatchdogFailures = 0;
+let telegramWatchdogTimer = null;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms))
+  ]);
+}
+
+function startTelegramWatchdog() {
+  if (telegramWatchdogTimer) return;
+
+  const intervalMs = Number(process.env.TELEGRAM_WATCHDOG_INTERVAL_MS || 60000);
+  const timeoutMs = Number(process.env.TELEGRAM_WATCHDOG_TIMEOUT_MS || 15000);
+  const maxFailures = Number(process.env.TELEGRAM_WATCHDOG_MAX_FAILURES || 3);
+
+  telegramWatchdogTimer = setInterval(async () => {
+    try {
+      await withTimeout(bot.telegram.getMe(), timeoutMs, 'Telegram getMe');
+      if (telegramWatchdogFailures > 0) {
+        logger.info('Telegram watchdog pulih, koneksi Telegram normal lagi.');
+      }
+      telegramWatchdogFailures = 0;
+    } catch (err) {
+      telegramWatchdogFailures += 1;
+      logger.error(`Telegram watchdog gagal (${telegramWatchdogFailures}/${maxFailures}): ${err.message}`);
+
+      if (telegramWatchdogFailures >= maxFailures) {
+        logger.error('Telegram polling dianggap macet. Bot akan keluar agar PM2 restart otomatis.');
+        setTimeout(() => process.exit(1), 1000);
+      }
+    }
+  }, intervalMs);
+
+  if (typeof telegramWatchdogTimer.unref === 'function') telegramWatchdogTimer.unref();
+  logger.info(`Telegram watchdog aktif: interval=${intervalMs}ms timeout=${timeoutMs}ms maxFailures=${maxFailures}`);
+}
+
+bot.catch((err) => {
+  logger.error(`Bot handler error: ${err && err.stack ? err.stack : err.message || err}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error(`Unhandled rejection: ${reason && reason.stack ? reason.stack : reason}`);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught exception: ${err && err.stack ? err.stack : err}`);
+  setTimeout(() => process.exit(1), 1000);
+});
+
+function stopBot(signal) {
+  logger.info(`Menerima ${signal}, menghentikan bot...`);
+  try { bot.stop(signal); } catch (e) { logger.error(`Gagal stop bot: ${e.message}`); }
+  process.exit(0);
+}
+
+process.once('SIGINT', () => stopBot('SIGINT'));
+process.once('SIGTERM', () => stopBot('SIGTERM'));
+
 app.listen(port, () => {
   bot.launch().then(() => {
       logger.info('Bot telah dimulai');
+      startTelegramWatchdog();
   }).catch((error) => {
-      logger.error('Error saat memulai bot:', error);
+      logger.error(`Error saat memulai bot: ${error && error.stack ? error.stack : error.message || error}`);
       process.exit(1);
   });
   logger.info(`Server berjalan di port ${port}`);

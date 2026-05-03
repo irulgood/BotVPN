@@ -105,8 +105,8 @@ if (exp >= 1 && exp <= 135) {
 *🔐 SSH Premium Details*
 ────────────────────────
 📡 *SSH WS*    : \`${s.hostname}:80@${s.username}:${s.password}\`
-🔒 *SSH SSL*   : \`ssl-${s.hostname}:443@${s.username}:${s.password}\`
-📶 *SSH UDP*   : \`udp-${s.hostname}:1-65535@${s.username}:${s.password}\`
+🔒 *SSH SSL*   : \`${s.hostname}:443@${s.username}:${s.password}\`
+📶 *SSH UDP*   : \`${s.hostname}:1-65535@${s.username}:${s.password}\`
 🌐 *SSH SLOWDNS* : \`ns-${s.hostname}:5300@${s.username}:${s.password}\`
 ────────────────────────
 🌍 *Host*         : \`${s.hostname}\`
@@ -166,9 +166,9 @@ https://drive.google.com/file/d/1Sj37lUzkizp2-OoriCgVUC1IDRGlP1e3/view?usp=shari
 🔗 http://${s.hostname}:81/myvpn-config.zip
 
 📥 *GRUP TESTIMOINI & BERBAGI BUG*:
-🔗 http://t.me/RAJA\\_VPN\\_STORE
+🔗 https://t.me/irul\\_tunell
 
-*© Telegram Bots - 2025*
+*© Telegram Bots - 2026*
 ✨ Terima kasih telah menggunakan layanan kami!
 `;
         return resolve(msg);
@@ -324,9 +324,9 @@ https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=shari
 3️⃣ Selesai & Connect 🚀  
 
 📥 *GRUP TESTIMOINI & BERBAGI BUG*:
-🔗 http://t.me/RAJA\\_VPN\\_STORE
+🔗 https://t.me/irul\\_tunell
 
-*© Telegram Bots - 2025*
+*© Telegram Bots - 2026*
 ✨ Terima kasih telah menggunakan layanan kami!
 `;
 
@@ -483,9 +483,9 @@ https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=shari
 3️⃣ Selesai & Connect 🚀  
 
 📥 *GRUP TESTIMOINI & BERBAGI BUG*:
-🔗 http://t.me/RAJA\\_VPN\\_STORE
+🔗 https://t.me/irul\\_tunell
 
-*© Telegram Bots - 2025*
+*© Telegram Bots - 2026*
 ✨ Terima kasih telah menggunakan layanan kami!
 `;
 
@@ -637,9 +637,9 @@ https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=shari
 3️⃣ Selesai & Connect 🚀  
 
 📥 *GRUP TESTIMOINI & BERBAGI BUG*:
-🔗 http://t.me/RAJA\\_VPN\\_STORE
+🔗 https://t.me/irul\\_tunell
 
-*© Telegram Bots - 2025*
+*© Telegram Bots - 2026*
 ✨ Terima kasih telah menggunakan layanan kami!
 `;
 
@@ -781,8 +781,10 @@ ${errMsg}`);
 📂 Google Drive:
 https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
 ────────────────────────
+📥 *GRUP TESTIMOINI & BERBAGI BUG*:
+🔗 https://t.me/irul\\_tunell
 
-*© Telegram Bots - 2025*
+*© Telegram Bots - 2026*
 ✨ Terima kasih telah menggunakan layanan kami!
 `;
         return resolve(msg);

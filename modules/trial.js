@@ -88,8 +88,8 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 *🔐 SSH Premium Details*
 ────────────────────────
 📡 *SSH WS*    : \`${s.hostname}:80@${s.username}:${s.password}\`
-🔒 *SSH SSL*   : \`ssl-${s.hostname}:443@${s.username}:${s.password}\`
-📶 *SSH UDP*   : \`udp-${s.hostname}:1-65535@${s.username}:${s.password}\`
+🔒 *SSH SSL*   : \`${s.hostname}:443@${s.username}:${s.password}\`
+📶 *SSH UDP*   : \`${s.hostname}:1-65535@${s.username}:${s.password}\`
 🌐 *SSH SLOWDNS* : \`ns-${s.hostname}:5300@${s.username}:${s.password}\`
 ────────────────────────
 🌍 *Host*         : \`${s.hostname}\`
@@ -131,7 +131,7 @@ Upgrade: websocket
 
 
 📥 *Download All Config UNLOCK SSH*:
-🔗 https://rajaserver.web.id/config-Indonesia.zip
+🔗 https://drive.google.com/drive/folders/1Yfg-r6c4RRAjcJX613G8w7I_UbTXlcS9
 
 📘 *TUTORIAL GANTI SSH*
 📂 Google Drive:

@@ -147,7 +147,7 @@ Upgrade: websocket
 \`\`\`
 
 📥 *Download All Config UNLOCK SSH*:
-🔗 https://rajaserver.web.id/config-Indonesia.zip
+🔗 https://drive.google.com/drive/folders/1Yfg-r6c4RRAjcJX613G8w7I_UbTXlcS9
 
 📘 *TUTORIAL GANTI SSH*
 📂 Google Drive:

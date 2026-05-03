@@ -156,6 +156,28 @@ const AUTH_TOKEN = vars.AUTH_TOKEN_ORKUT;    // token orderkuota
 
 const bot = new Telegraf(BOT_TOKEN);
 let paymentEngine;
+
+async function safeGroupSend(text, extra = {}) {
+  const gid = String(GROUP_ID || '').trim();
+  if (!gid || gid === 'undefined' || gid === 'null' || gid === '0') {
+    logger.warn('Notif grup dilewati: GROUP_ID belum diset. Isi GROUP_ID di .vars.json kalau ingin notifikasi grup.');
+    return null;
+  }
+  try {
+    return await bot.telegram.sendMessage(gid, text, extra);
+  } catch (error) {
+    logger.error(`Notif grup gagal, fallback ke plain text: ${error.message}`);
+    const fallback = { ...extra };
+    delete fallback.parse_mode;
+    try {
+      return await bot.telegram.sendMessage(gid, text, fallback);
+    } catch (err2) {
+      logger.error(`Fallback notif grup juga gagal: ${err2.message}`);
+      return null;
+    }
+  }
+}
+
 let ADMIN_USERNAME = '@ARI_VPN_STORE';
 const adminIds = (Array.isArray(ADMIN) ? ADMIN : String(ADMIN).split(','))
   .map(id => String(id).trim())

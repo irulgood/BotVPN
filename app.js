@@ -178,14 +178,19 @@ async function safeReplyMessage(ctx, text, extra = {}) {
 }
 
 async function safeGroupSend(text, extra = {}) {
+  const gid = String(GROUP_ID || '').trim();
+  if (!gid || gid === 'undefined' || gid === 'null' || gid === '0') {
+    logger.warn('Notif grup dilewati: GROUP_ID belum diset. Isi GROUP_ID di .vars.json kalau ingin notifikasi grup.');
+    return null;
+  }
   try {
-    return await bot.telegram.sendMessage(GROUP_ID, text, extra);
+    return await bot.telegram.sendMessage(gid, text, extra);
   } catch (error) {
     logger.error(`Notif grup gagal, fallback ke plain text: ${error.message}`);
     const fallback = { ...extra };
     delete fallback.parse_mode;
     try {
-      return await bot.telegram.sendMessage(GROUP_ID, text, fallback);
+      return await bot.telegram.sendMessage(gid, text, fallback);
     } catch (err2) {
       logger.error(`Fallback notif grup juga gagal: ${err2.message}`);
       return null;

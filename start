@@ -1,7 +1,4 @@
 #!/bin/bash
-sudo apt remove nodejs -y
-sudo apt purge nodejs -y
-sudo apt autoremove -y
 # Colors
 green="\e[38;5;82m"
 red="\e[38;5;196m"
@@ -46,31 +43,35 @@ cek_status() {
 setup_bot() {
     timedatectl set-timezone Asia/Jakarta || echo -e "${red}Failed to set timezone to Jakarta${neutral}"
 
-    if ! dpkg -s nodejs >/dev/null 2>&1; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - || echo -e "${red}Failed to download Node.js setup${neutral}"
-        apt-get install -y nodejs || echo -e "${red}Failed to install Node.js${neutral}"
-    else
-        echo -e "${green}Node.js is already installed, skipping...${neutral}"
-    fi
+    echo -e "${yellow}Menyiapkan folder BotVPN...${neutral}"
+    apt update -y
+    apt install -y curl git unzip jq cron ca-certificates
 
-   rm -rf /root/BotVPN
-
-    if [ ! -f /root/BotVPN/app.js ]; then
-        git clone https://github.com/irulgood/BotVPN.git /root/BotVPN
-    fi
-apt install jq -y
-apt install npm -y
-npm install -g npm@latest
-npm install -g pm2
-
-    if ! npm list --prefix /root/BotVPN express telegraf axios moment sqlite3 >/dev/null 2>&1; then
-        npm install --prefix /root/BotVPN sqlite3 express crypto telegraf axios dotenv
-    fi
+    rm -rf /root/BotVPN
+    git clone https://github.com/irulgood/BotVPN.git /root/BotVPN || {
+        echo -e "${red}Gagal clone repository BotVPN.${neutral}"
+        exit 1
+    }
 
     if [ -n "$(ls -A /root/BotVPN)" ]; then
-        chmod +x /root/BotVPN/*
+        chmod +x /root/BotVPN/* 2>/dev/null || true
+        chmod +x /root/BotVPN/install-deps.sh 2>/dev/null || true
+    fi
+
+    echo -e "${yellow}Menginstall dependency aman untuk Ubuntu 20/22/24...${neutral}"
+    if [ -f /root/BotVPN/install-deps.sh ]; then
+        START_PM2=0 APP_NAME=sellvpn BOT_DIR=/root/BotVPN bash /root/BotVPN/install-deps.sh
+    else
+        echo -e "${red}install-deps.sh tidak ditemukan. Install dependency manual.${neutral}"
+        cd /root/BotVPN
+        apt install -y build-essential python3 make g++ sqlite3 libsqlite3-dev
+        npm install -g pm2@latest
+        npm install express axios telegraf winston dotenv
+        rm -rf node_modules/sqlite3
+        npm_config_build_from_source=true npm install sqlite3@5.1.6
     fi
 }
+
 
 server_app() {
 clear

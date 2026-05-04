@@ -151,7 +151,7 @@ Upgrade: websocket
 
 📘 *TUTORIAL GANTI SSH*
 📂 Google Drive:
-https://drive.google.com/file/d/1PGjMZcWkjOCjZMBXIlqpTTSRG4lCfYn/view?usp=sharing
+https://drive.google.com/file/d/1tFbQjfjoc79xAWW0sgYXPwGLIb6mxFa0/view?usp=drivesdk
 
 📘 *TUTORIAL BUAT CONFIG MODE SSH*
 📂 Google Drive:

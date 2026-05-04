@@ -779,7 +779,7 @@ ${errMsg}`);
 
 📘 *TUTORIAL PASANG ZIVPN*
 📂 Google Drive:
-https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
+https://drive.google.com/file/d/1K8_sMpU6Fo14A_ahhEmhTwzh7aNf1rwc/view?usp=drivesdk
 ────────────────────────
 📥 *GRUP TESTIMOINI & BERBAGI BUG*:
 🔗 https://t.me/irul\\_tunell

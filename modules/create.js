@@ -155,7 +155,7 @@ https://drive.google.com/file/d/1tFbQjfjoc79xAWW0sgYXPwGLIb6mxFa0/view?usp=drive
 
 📘 *TUTORIAL BUAT CONFIG MODE SSH*
 📂 Google Drive:
-https://drive.google.com/file/d/1Sj37lUzkizp2-OoriCgVUC1IDRGlP1e3/view?usp=sharing
+https://drive.google.com/file/d/1tFbQjfjoc79xAWW0sgYXPwGLIb6mxFa0/view?usp=drivesdk
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  

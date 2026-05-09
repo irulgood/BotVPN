@@ -476,39 +476,51 @@ const statusReseller = isReseller ? 'Reseller' : 'Bukan Reseller';
   const latency = (Math.random() * 0.1 + 0.01).toFixed(2);
 
   const messageText = `
-╭─ <b>⚡ BOT VPN ${NAMA_STORE} ⚡</b>
-├ Bot VPN Premium dengan sistem otomatis
-├ Pembelian layanan VPN berkualitas tinggi
-└ Akses internet cepat & aman dengan server terpercaya! 
+━━━━━━━━━━━━━━━━━━
+⚡ <b>${NAMA_STORE}</b> ⚡
+━━━━━━━━━━━━━━━━━━
 
-<b>👋 Hai, Member <code>${userName}</code>!</b>
-ID: <code>${userId}</code>
-Saldo: <code>Rp ${saldo}</code>
-Status: <code>${statusReseller}</code>
+🔐 <b>PREMIUM VPN BOT</b>
+🚀 Fast • Secure • Stable
 
-📊 <b>Statistik Anda</b>
-• Hari Ini    : ${userToday} akun
-• Minggu Ini  : ${userWeek} akun
-• Bulan Ini   : ${userMonth} akun
+👋 Halo, <b>${userName}</b>
+🆔 ID : <code>${userId}</code>
 
-🌐 <b>Statistik Global</b>
-• Hari Ini    : ${globalToday} akun
-• Minggu Ini  : ${globalWeek} akun
-• Bulan Ini   : ${globalMonth} akun
+╭─〔 👤 ACCOUNT INFO 〕
+├ 💰 Saldo : <code>Rp ${saldo}</code>
+├ 🏷️ Status : <code>${statusReseller}</code>
+╰────────────────
 
+╭─〔 🌐 GLOBAL STATS 〕
+├ 📅 Today : <b>${globalToday}</b>
+├ 📈 Weekly : <b>${globalWeek}</b>
+├ 📆 Monthly : <b>${globalMonth}</b>
+╰────────────────
 
-⚙️ <b>COMMAND</b>
-• 🏠 Menu Utama   : /start
-• 🔑 Menu Admin   : /admin
-• 🛡️ Admin Panel  : /helpadmin
+╭─〔 ⚙️ BOT MENU 〕
+├ 🏠 /start
+├ 🔑 /admin
+├ 🛡️ /helpadmin
+╰────────────────
 
-👨‍💻 <b>Pembuat:</b> ARI_VPN_STORE
-🛠️ <b>Credit:</b> ARI STORE × API POTATO
-🔧 <b>Base:</b> FighterTunnel
-👥 <b>Pengguna BOT:</b> ${jumlahPengguna}
-⏱️ <b>Latency:</b> ${latency} ms
-──────────────────────────`;
+╭─〔 📜 TERMS OF SERVICE 〕
+├ 🚫 No Spam
+├ 🚫 No DDoS
+├ 🚫 No Hacking
+├ 🚫 No Torrent
+├ 🚫 No Multi Login
+╰────────────────
 
+╭─〔 ℹ️ BOT INFO 〕
+├ 👥 Users : <b>${jumlahPengguna}</b>
+├ ⚡ Latency : <b>${latency} ms</b>
+├ 🛠️ Credit : <b>ARI STORE</b>
+╰────────────────
+
+━━━━━━━━━━━━━━━━━━
+⚡ THANK YOU FOR USING ⚡
+<b>${NAMA_STORE}</b>
+━━━━━━━━━━━━━━━━━━`;
 let keyboard;
   keyboard = [
     [

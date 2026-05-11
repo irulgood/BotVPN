@@ -131,15 +131,15 @@ Upgrade: websocket
 
 
 📥 *Download All Config UNLOCK SSH*:
-🔗 https://drive.google.com/drive/folders/1Yfg-r6c4RRAjcJX613G8w7I_UbTXlcS9
+🔗 https://drive.google.com/drive/folders/1Yfg-r6c4RRAjcJX613G8w7I\\_UbTXlcS9
 
 📘 *TUTORIAL GANTI SSH*
 📂 Google Drive:
-https://drive.google.com/file/d/1PGjMZcWkjOCjZMBXIlqpTTSRG4lCfYn/view?usp=sharing
+https://drive.google.com/file/d/1tFbQjfjoc79xAWW0sgYXPwGLIb6mxFa0/view?usp=drivesdk
 
 📘 *TUTORIAL BUAT CONFIG MODE SSH*
 📂 Google Drive:
-https://drive.google.com/file/d/1Sj37lUzkizp2-OoriCgVUC1IDRGlP1e3/view?usp=sharing
+https://drive.google.com/drive/folders/1HXIO9eXhkLd2DyOprFMmg1aQ4HNQqXdB
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  
@@ -247,7 +247,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 ──────────────
 👤 *Username*     : \`${s.username}\`
 🌍 *Host Default* : \`${s.hostname}\`
-🌍 *Host SSL*     : \`ssl-${s.hostname}\`
+🌍 *Host SSL*     : \`${s.hostname}\`
 🏢 *ISP*          : \`${s.ISP}\`
 🏙️ *City*         : \`${s.CITY}\`
 🛡 *UUID*         : \`${s.uuid}\`
@@ -283,7 +283,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 
 📘 *TUTORIAL BUAT CONFIG MODE VMESS VLESS TROJAN*
 📂 Google Drive:
-https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=sharing
+https://drive.google.com/drive/folders/1JWyqD00TZEIGXOpm7WzAhNnWlUncz3WT
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  
@@ -390,7 +390,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 ──────────────
 👤 *Username*     : \`${s.username}\`
 🌍 *Host Default* : \`${s.hostname}\`
-🌍 *Host SSL*     : \`ssl-${s.hostname}\`
+🌍 *Host SSL*     : \`${s.hostname}\`
 🏢 *ISP*          : \`${s.ISP}\`
 🏙️ *City*         : \`${s.CITY}\`
 🛡 *UUID*         : \`${s.uuid}\`
@@ -425,7 +425,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 
 📘 *TUTORIAL BUAT CONFIG MODE VMESS VLESS TROJAN*
 📂 Google Drive:
-https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=sharing
+https://drive.google.com/drive/folders/1JWyqD00TZEIGXOpm7WzAhNnWlUncz3WT
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  
@@ -531,7 +531,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 ──────────────
 👤 *Username*     : \`${s.username}\`
 🌍 *Host Default* : \`${s.hostname}\`
-🌍 *Host SSL*     : \`ssl-${s.hostname}\`
+🌍 *Host SSL*     : \`${s.hostname}\`
 🏢 *ISP*          : \`${s.ISP}\`
 🏙️ *City*         : \`${s.CITY}\`
 🔑 *Key*          : \`${s.uuid}\`
@@ -562,7 +562,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 
 📘 *TUTORIAL BUAT CONFIG MODE VMESS VLESS TROJAN*
 📂 Google Drive:
-https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=sharing
+https://drive.google.com/drive/folders/1JWyqD00TZEIGXOpm7WzAhNnWlUncz3WT
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  
@@ -696,7 +696,7 @@ ${errMsg}`);
 
 📘 *TUTORIAL PASANG ZIVPN*
 📂 Google Drive:
-https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
+https://drive.google.com/drive/folders/1hc-RBfzPveXBmAE\\_przXRFZCh8w2XVFZ
 ────────────────────────
 📥 *GRUP TESTIMOINI & BERBAGI BUG*:
 🔗 https://t.me/irul\\_tunell

@@ -155,7 +155,7 @@ https://drive.google.com/file/d/1tFbQjfjoc79xAWW0sgYXPwGLIb6mxFa0/view?usp=drive
 
 📘 *TUTORIAL BUAT CONFIG MODE SSH*
 📂 Google Drive:
-https://drive.google.com/file/d/1tFbQjfjoc79xAWW0sgYXPwGLIb6mxFa0/view?usp=drivesdk
+https://drive.google.com/drive/folders/1HXIO9eXhkLd2DyOprFMmg1aQ4HNQqXdB
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  
@@ -280,7 +280,7 @@ if (exp >= 1 && exp <= 135) {
 ──────────────
 👤 *Username*     : \`${s.username}\`
 🌍 *Host Default* : \`${s.hostname}\`
-🌍 *Host SSL*     : \`ssl-${s.hostname}\`
+🌍 *Host SSL*     : \`${s.hostname}\`
 🏢 *ISP*          : \`${s.ISP}\`
 🏙️ *City*         : \`${s.CITY}\`
 🛡 *UUID*          : \`${s.uuid}\`
@@ -316,7 +316,7 @@ if (exp >= 1 && exp <= 135) {
 
 📘 *TUTORIAL BUAT CONFIG MODE VMESS VLESS TROJAN*
 📂 Google Drive:
-https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=sharing
+https://drive.google.com/drive/folders/1JWyqD00TZEIGXOpm7WzAhNnWlUncz3WT
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  
@@ -440,7 +440,7 @@ if (exp >= 1 && exp <= 135) {
 ──────────────
 👤 *Username*     : \`${s.username}\`
 🌍 *Host Default* : \`${s.hostname}\`
-🌍 *Host SSL*     : \`ssl-${s.hostname}\`
+🌍 *Host SSL*     : \`${s.hostname}\`
 🏢 *ISP*          : \`${s.ISP}\`
 🏙️ *City*         : \`${s.CITY}\`
 🛡 *UUID*         : \`${s.uuid}\`
@@ -475,7 +475,7 @@ if (exp >= 1 && exp <= 135) {
 
 📘 *TUTORIAL BUAT CONFIG MODE VMESS VLESS TROJAN*
 📂 Google Drive:
-https://drive.google.com/file/d/1SmgoAUjTf9tt297deVkn6cd7ZOuha62a/view?usp=sharing
+https://drive.google.com/drive/folders/1JWyqD00TZEIGXOpm7WzAhNnWlUncz3WT
 
 📌 *Langkah Singkat:*
 1️⃣ Buka link di atas  
@@ -598,7 +598,7 @@ if (exp >= 1 && exp <= 135) {
 ──────────────
 👤 *Username*     : \`${s.username}\`
 🌍 *Host Default* : \`${s.hostname}\`
-🌍 *Host SSL*     : \`ssl-${s.hostname}\`
+🌍 *Host SSL*     : \`${s.hostname}\`
 🏢 *ISP*          : \`${s.ISP}\`
 🏙️ *City*         : \`${s.CITY}\`
 🔑 *Key*          : \`${s.uuid}\`
@@ -779,7 +779,7 @@ ${errMsg}`);
 
 📘 *TUTORIAL PASANG ZIVPN*
 📂 Google Drive:
-https://drive.google.com/file/d/1K8_sMpU6Fo14A_ahhEmhTwzh7aNf1rwc/view?usp=drivesdk
+https://drive.google.com/drive/folders/1hc-RBfzPveXBmAE\\_przXRFZCh8w2XVFZ
 ────────────────────────
 📥 *GRUP TESTIMOINI & BERBAGI BUG*:
 🔗 https://t.me/irul\\_tunell

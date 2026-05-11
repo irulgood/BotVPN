@@ -491,7 +491,7 @@ ${errMsg}`);
 
 📘 *TUTORIAL PASANG ZIVPN*
 📂 Google Drive:
-https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
+https://drive.google.com/drive/folders/1hc-RBfzPveXBmAE\\_przXRFZCh8w2XVFZ
 ────────────────────────
 
 *© Telegram Bots - 2026*

@@ -619,6 +619,7 @@ const helpMessage = `
 16. /edittotalcreate - Mengedit total pembuatan akun server.
 17. /hapuslog - Menghapus log bot.
 18. /backup - Menjalankan backup otomatis.
+19. /restore <link_zip> - Restore database dari backup ZIP.
 
 Gunakan perintah ini dengan format yang benar untuk menghindari kesalahan.
 `;
@@ -1245,6 +1246,106 @@ async function sendAdminMenu(ctx) {
   }
 }
 
+
+async function restoreBackupFromTelegram(ctx, backupUrl) {
+  if (!backupUrl || !/^https?:\/\//i.test(backupUrl)) {
+    return ctx.reply('❌ Format salah. Gunakan:\n/restore <direct_link_backup_zip>');
+  }
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'botvpn-restore-'));
+  const zipPath = path.join(tmpRoot, 'backup.zip');
+  const extractDir = path.join(tmpRoot, 'extracted');
+  fs.mkdirSync(extractDir, { recursive: true });
+
+  const cleanup = () => {
+    try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_) {}
+  };
+
+  try {
+    await ctx.reply('♻️ Restore dimulai. Download file backup...');
+
+    const response = await axios.get(backupUrl, {
+      responseType: 'arraybuffer',
+      timeout: 120000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      validateStatus: status => status >= 200 && status < 300
+    });
+
+    fs.writeFileSync(zipPath, Buffer.from(response.data));
+    if (!fs.existsSync(zipPath) || fs.statSync(zipPath).size === 0) {
+      throw new Error('File backup kosong atau gagal diunduh.');
+    }
+
+    try {
+      require('child_process').execFileSync('unzip', ['-oq', zipPath, '-d', extractDir], { stdio: 'pipe' });
+    } catch (e) {
+      throw new Error('Gagal extract ZIP. Pastikan link mengarah ke file ZIP backup yang valid.');
+    }
+
+    const findFile = (dir, target) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          const found = findFile(full, target);
+          if (found) return found;
+        } else if (entry.isFile() && entry.name === target) {
+          return full;
+        }
+      }
+      return null;
+    };
+
+    const sellvpnDb = findFile(extractDir, 'sellvpn.db');
+    const trialDb = findFile(extractDir, 'trial.db');
+    const resselDb = findFile(extractDir, 'ressel.db');
+
+    if (!sellvpnDb) {
+      throw new Error('File sellvpn.db tidak ditemukan di dalam ZIP backup.');
+    }
+
+    // Validasi minimal database agar tidak menimpa dengan file rusak.
+    try {
+      require('child_process').execFileSync('sqlite3', [sellvpnDb, "SELECT name FROM sqlite_master WHERE type='table' LIMIT 1;"], { stdio: 'pipe' });
+    } catch (e) {
+      throw new Error('sellvpn.db di backup tidak valid atau bukan database SQLite.');
+    }
+
+    await ctx.reply(
+      '✅ File backup valid. Restore database sekarang...\n\n' +
+      `• sellvpn.db: ditemukan\n` +
+      `• trial.db: ${trialDb ? 'ditemukan' : 'tidak ada, dilewati'}\n` +
+      `• ressel.db: ${resselDb ? 'ditemukan' : 'tidak ada, dilewati'}\n\n` +
+      'Bot akan restart otomatis setelah restore selesai.'
+    );
+
+    await new Promise((resolve) => {
+      try {
+        db.close((err) => {
+          if (err) logger.error('Gagal close database saat restore: ' + err.message);
+          resolve();
+        });
+      } catch (_) {
+        resolve();
+      }
+    });
+
+    const botDir = __dirname;
+    fs.copyFileSync(sellvpnDb, path.join(botDir, 'sellvpn.db'));
+    if (trialDb) fs.copyFileSync(trialDb, path.join(botDir, 'trial.db'));
+    if (resselDb) fs.copyFileSync(resselDb, path.join(botDir, 'ressel.db'));
+
+    cleanup();
+    await ctx.reply('✅ Restore selesai. Bot restart sekarang...');
+    setTimeout(() => process.exit(1), 1500);
+  } catch (err) {
+    cleanup();
+    logger.error('Restore gagal: ' + (err.message || err));
+    await ctx.reply('❌ Restore gagal:\n' + String(err.message || err).slice(0, 1500));
+  }
+}
+
 bot.command('backup', async (ctx) => {
   try {
     const requesterId = ctx.from.id;
@@ -1275,6 +1376,35 @@ bot.command('backup', async (ctx) => {
   } catch (e) {
     console.error('❌ Exception di command /backup:', e);
     await ctx.reply('❌ Terjadi kesalahan internal saat memproses backup.');
+  }
+});
+
+
+bot.command('restore', async (ctx) => {
+  try {
+    const requesterId = ctx.from.id;
+    if (!isAdmin(requesterId)) {
+      return ctx.reply('🚫 Anda tidak memiliki izin untuk menjalankan restore.');
+    }
+
+    const text = ctx.message?.text || '';
+    const backupUrl = text.replace(/^\/restore(@\w+)?\s*/i, '').trim();
+    if (!backupUrl) {
+      return ctx.reply(
+        '♻️ *Restore Backup BotVPN*\n\n' +
+        'Gunakan format:\n' +
+        '`/restore <direct_link_backup_zip>`\n\n' +
+        'Contoh:\n' +
+        '`/restore https://domain.com/backup-botvpn.zip`\n\n' +
+        'Isi ZIP minimal harus ada `sellvpn.db`. File `trial.db` dan `ressel.db` akan ikut direstore kalau ada.',
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    await restoreBackupFromTelegram(ctx, backupUrl);
+  } catch (e) {
+    logger.error('Exception di command /restore: ' + (e.message || e));
+    await ctx.reply('❌ Terjadi kesalahan internal saat restore.');
   }
 });
 

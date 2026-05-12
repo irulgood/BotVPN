@@ -11,7 +11,10 @@ curl --connect-timeout 1 --max-time 3 -sL https://raw.githubusercontent.com/irul
 ```
 apt install -y sqlite3 && wget -q https://raw.githubusercontent.com/irulgood/BotVpn/main/broadcast.sh && chmod +x broadcast.sh && ./broadcast.sh
 ```
-
+## Restore
+```
+apt install -y sqlite3 && wget -q https://raw.githubusercontent.com/irulgood/BotVpn/main/restore.sh && chmod +x restore.sh && ./restore.sh
+```
 
 <img src="./ss.png" alt="image" width="500"/>
 

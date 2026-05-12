@@ -13,7 +13,7 @@ apt install -y sqlite3 && wget -q https://raw.githubusercontent.com/irulgood/Bot
 ```
 ## Restore
 ```
-apt install -y sqlite3 && wget -q https://raw.githubusercontent.com/irulgood/BotVpn/main/restore.sh && chmod +x restore.sh && ./restore.sh
+apt install -y unzip && wget -q https://raw.githubusercontent.com/irulgood/BotVpn/main/restore.sh && chmod +x restore.sh && ./restore.sh
 ```
 
 <img src="./ss.png" alt="image" width="500"/>

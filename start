@@ -1,4 +1,7 @@
 #!/bin/bash
+sudo apt remove nodejs -y
+sudo apt purge nodejs -y
+sudo apt autoremove -y
 # Colors
 green="\e[38;5;82m"
 red="\e[38;5;196m"
@@ -43,35 +46,31 @@ cek_status() {
 setup_bot() {
     timedatectl set-timezone Asia/Jakarta || echo -e "${red}Failed to set timezone to Jakarta${neutral}"
 
-    echo -e "${yellow}Menyiapkan folder BotVPN...${neutral}"
-    apt update -y
-    apt install -y curl git unzip jq cron ca-certificates
+    if ! dpkg -s nodejs >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - || echo -e "${red}Failed to download Node.js setup${neutral}"
+        apt-get install -y nodejs || echo -e "${red}Failed to install Node.js${neutral}"
+    else
+        echo -e "${green}Node.js is already installed, skipping...${neutral}"
+    fi
 
-    rm -rf /root/BotVPN
-    git clone https://github.com/irulgood/BotVPN.git /root/BotVPN || {
-        echo -e "${red}Gagal clone repository BotVPN.${neutral}"
-        exit 1
-    }
+   rm -rf /root/BotVPN
+
+    if [ ! -f /root/BotVPN/app.js ]; then
+        git clone https://github.com/irulgood/BotVPN.git /root/BotVPN
+    fi
+apt install jq zip -y
+apt install npm -y
+npm install -g npm@latest
+npm install -g pm2
+
+    if ! npm list --prefix /root/BotVPN express telegraf axios moment sqlite3 >/dev/null 2>&1; then
+        npm install --prefix /root/BotVPN sqlite3 express crypto telegraf axios dotenv
+    fi
 
     if [ -n "$(ls -A /root/BotVPN)" ]; then
-        chmod +x /root/BotVPN/* 2>/dev/null || true
-        chmod +x /root/BotVPN/install-deps.sh 2>/dev/null || true
-    fi
-
-    echo -e "${yellow}Menginstall dependency aman untuk Ubuntu 20/22/24...${neutral}"
-    if [ -f /root/BotVPN/install-deps.sh ]; then
-        START_PM2=0 APP_NAME=sellvpn BOT_DIR=/root/BotVPN bash /root/BotVPN/install-deps.sh
-    else
-        echo -e "${red}install-deps.sh tidak ditemukan. Install dependency manual.${neutral}"
-        cd /root/BotVPN
-        apt install -y build-essential python3 make g++ sqlite3 libsqlite3-dev
-        npm install -g pm2@latest
-        npm install express axios telegraf winston dotenv
-        rm -rf node_modules/sqlite3
-        npm_config_build_from_source=true npm install sqlite3@5.1.6
+        chmod +x /root/BotVPN/*
     fi
 }
-
 
 server_app() {
 clear
@@ -168,10 +167,27 @@ cd
 cat >/usr/bin/backup_sellvpn <<'EOF'
 #!/bin/bash
 # File: /usr/bin/backup_sellvpn
-# Pastikan chmod +x /usr/bin/backup_sellvpn
+# Backup BotVPN dalam 1 file ZIP lalu kirim ke Telegram admin
 
 VARS_FILE="/root/BotVPN/.vars.json"
 DB_FOLDER="/root/BotVPN"
+BACKUP_DIR="/tmp/botvpn-backup"
+TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+ZIP_FILE="$BACKUP_DIR/backup-botvpn-$TIMESTAMP.zip"
+
+mkdir -p "$BACKUP_DIR"
+rm -f "$BACKUP_DIR"/backup-botvpn-*.zip
+
+# Cek dependency
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq belum terinstall"
+    exit 1
+fi
+
+if ! command -v zip >/dev/null 2>&1; then
+    echo "❌ zip belum terinstall"
+    exit 1
+fi
 
 # Cek file .vars.json
 if [ ! -f "$VARS_FILE" ]; then
@@ -180,37 +196,71 @@ if [ ! -f "$VARS_FILE" ]; then
 fi
 
 # Ambil nilai dari .vars.json
-BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$VARS_FILE")
-USER_ID=$(jq -r '.USER_ID' "$VARS_FILE")
+BOT_TOKEN=$(jq -r '.BOT_TOKEN // empty' "$VARS_FILE")
+USER_ID=$(jq -r '.USER_ID // empty' "$VARS_FILE")
 
 if [ -z "$BOT_TOKEN" ] || [ -z "$USER_ID" ]; then
     echo "❌ BOT_TOKEN atau USER_ID kosong di $VARS_FILE"
     exit 1
 fi
 
-# Daftar file database
-DB_FILES=("sellvpn.db" "trial.db" "ressel.db")
+cd "$DB_FOLDER" || {
+    echo "❌ Folder $DB_FOLDER tidak ditemukan"
+    exit 1
+}
 
-for DB_FILE in "${DB_FILES[@]}"; do 
-    FILE_PATH="$DB_FOLDER/$DB_FILE"
-    if [ -f "$FILE_PATH" ]; then
-        curl -sS --connect-timeout 1 --max-time 30 -F chat_id="$USER_ID" \
-             -F document=@"$FILE_PATH" \
-             "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" >/dev/null 2>&1
-        echo "✅ $DB_FILE terkirim ke Telegram"
+# Daftar file yang dibackup
+BACKUP_FILES=()
+for FILE in sellvpn.db trial.db ressel.db; do
+    if [ -f "$FILE" ]; then
+        BACKUP_FILES+=("$FILE")
+        echo "✅ $FILE masuk backup"
     else
-        echo "❌ File $DB_FILE tidak ditemukan"
+        echo "⚠️ $FILE tidak ditemukan, dilewati"
     fi
 done
 
-echo "✅ Semua backup selesai."
+if [ ${#BACKUP_FILES[@]} -eq 0 ]; then
+    echo "❌ Tidak ada file database yang bisa dibackup"
+    exit 1
+fi
+
+zip -q -j "$ZIP_FILE" "${BACKUP_FILES[@]}"
+
+if [ ! -s "$ZIP_FILE" ]; then
+    echo "❌ Gagal membuat file ZIP backup"
+    exit 1
+fi
+
+CAPTION="✅ Backup BotVPN
+📦 File: $(basename "$ZIP_FILE")
+🕒 Waktu: $(date '+%Y-%m-%d %H:%M:%S WIB')
+📄 Isi: ${BACKUP_FILES[*]}"
+
+HTTP_CODE=$(curl -sS --connect-timeout 10 --max-time 120 \
+    -w "%{http_code}" -o /tmp/backup_sellvpn_response.json \
+    -F chat_id="$USER_ID" \
+    -F document=@"$ZIP_FILE" \
+    -F caption="$CAPTION" \
+    "https://api.telegram.org/bot$BOT_TOKEN/sendDocument")
+
+if [ "$HTTP_CODE" = "200" ]; then
+    echo "✅ Backup ZIP terkirim ke Telegram: $ZIP_FILE"
+    rm -f "$ZIP_FILE" /tmp/backup_sellvpn_response.json
+    exit 0
+else
+    echo "❌ Gagal kirim backup ZIP ke Telegram. HTTP: $HTTP_CODE"
+    cat /tmp/backup_sellvpn_response.json 2>/dev/null || true
+    exit 1
+fi
 EOF
 
 # bikin cron job tiap jam 12 malam
 cat >/etc/cron.d/backup_sellvpn <<'EOF'
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-0 0 * * * root /usr/bin/backup_sellvpn
+# Backup BotVPN setiap 6 jam: 00:00, 06:00, 12:00, 18:00 WIB
+0 */6 * * * root /usr/bin/backup_sellvpn >> /var/log/backup_sellvpn.log 2>&1
 EOF
 
 chmod +x /usr/bin/backup_sellvpn

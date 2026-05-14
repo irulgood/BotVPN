@@ -1,178 +1,142 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/bin/bash
+set -e
 
-# BotVPN safe updater
-# Tujuan: update file bot tanpa install ulang dan tanpa mengisi ulang .vars.json.
-# File penting seperti .vars.json, database, reseller/trial db, dan receipts akan dibackup lalu direstore.
-
-APP_NAME="${APP_NAME:-sellvpn}"
+# Update BotVPN tanpa install ulang.
+# Yang di-update:
+# - app.js
+# - app_user.js
+# - semua file di folder modules/
+#
+# Yang TIDAK disentuh:
+# - .vars.json
+# - sellvpn.db
+# - trial.db
+# - ressel.db
+# - receipts/
+#
+# Default:
 BOT_DIR="${BOT_DIR:-/root/BotVPN}"
-REPO_URL="${REPO_URL:-https://github.com/irulgood/BotVPN.git}"
-BRANCH="${BRANCH:-main}"
-BACKUP_ROOT="${BACKUP_ROOT:-/root/BotVPN-backups}"
+REPO_ZIP="${REPO_ZIP:-https://github.com/irulgood/BotVpn/archive/refs/heads/main.zip}"
+PM2_NAME="${PM2_NAME:-sellvpn}"
 
-TS="$(date +%Y%m%d-%H%M%S)"
-BACKUP_DIR="$BACKUP_ROOT/update-$TS"
-TMP_DIR="/tmp/botvpn-update-$TS"
+TMP_DIR="/tmp/botvpn-update-$(date +%s)"
+ZIP_FILE="$TMP_DIR/repo.zip"
 
-log() { echo -e "\033[1;32m[UPDATE]\033[0m $*"; }
-warn() { echo -e "\033[1;33m[WARN]\033[0m $*"; }
-err() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; }
+echo "=== BotVPN Update Script ==="
+echo "BOT_DIR : $BOT_DIR"
+echo "REPO_ZIP: $REPO_ZIP"
+echo "PM2_NAME: $PM2_NAME"
+echo ""
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    err "Command '$1' belum ada. Install dulu: apt install -y $1"
-    exit 1
-  }
+if [ ! -d "$BOT_DIR" ]; then
+  echo "ERROR: Folder bot tidak ditemukan: $BOT_DIR"
+  exit 1
+fi
+
+command -v curl >/dev/null 2>&1 || {
+  echo "ERROR: curl belum terinstall. Install: apt install -y curl"
+  exit 1
 }
 
-backup_path() {
-  local p="$1"
-  if [ -e "$BOT_DIR/$p" ]; then
-    mkdir -p "$BACKUP_DIR/$(dirname "$p")"
-    cp -a "$BOT_DIR/$p" "$BACKUP_DIR/$p"
-    log "Backup: $p"
-  fi
+command -v unzip >/dev/null 2>&1 || {
+  echo "ERROR: unzip belum terinstall. Install: apt install -y unzip"
+  exit 1
 }
 
-restore_path() {
-  local p="$1"
-  if [ -e "$BACKUP_DIR/$p" ]; then
-    mkdir -p "$BOT_DIR/$(dirname "$p")"
-    rm -rf "$BOT_DIR/$p"
-    cp -a "$BACKUP_DIR/$p" "$BOT_DIR/$p"
-    log "Restore: $p"
-  fi
-}
+mkdir -p "$TMP_DIR"
 
-log "Mulai update BotVPN"
-log "Folder bot : $BOT_DIR"
-log "App PM2    : $APP_NAME"
+echo "[1/7] Download repo terbaru..."
+curl -L --fail --silent --show-error -o "$ZIP_FILE" "$REPO_ZIP"
 
-need_cmd pm2
-need_cmd node
-need_cmd npm
-need_cmd curl
-need_cmd tar
+if [ ! -s "$ZIP_FILE" ]; then
+  echo "ERROR: Gagal download repo atau file kosong."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
 
-mkdir -p "$BOT_DIR" "$BACKUP_DIR"
+echo "[2/7] Extract repo..."
+unzip -q "$ZIP_FILE" -d "$TMP_DIR"
+
+SRC_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d -name 'BotVpn-*' -o -name 'BotVPN-*' | head -n 1)"
+
+if [ -z "$SRC_DIR" ]; then
+  SRC_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d | grep -v "^$TMP_DIR$" | head -n 1)"
+fi
+
+if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+  echo "ERROR: Folder hasil extract repo tidak ditemukan."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+echo "Source: $SRC_DIR"
+
+echo "[3/7] Validasi file sumber..."
+if [ ! -f "$SRC_DIR/app.js" ]; then
+  echo "ERROR: app.js tidak ditemukan di repo."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+if [ ! -f "$SRC_DIR/app_user.js" ]; then
+  echo "ERROR: app_user.js tidak ditemukan di repo."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+if [ ! -d "$SRC_DIR/modules" ]; then
+  echo "ERROR: folder modules/ tidak ditemukan di repo."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+echo "[4/7] Backup file lama..."
+BACKUP_DIR="$BOT_DIR/backup-before-update-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+[ -f "$BOT_DIR/app.js" ] && cp "$BOT_DIR/app.js" "$BACKUP_DIR/app.js"
+[ -f "$BOT_DIR/app_user.js" ] && cp "$BOT_DIR/app_user.js" "$BACKUP_DIR/app_user.js"
+[ -d "$BOT_DIR/modules" ] && cp -r "$BOT_DIR/modules" "$BACKUP_DIR/modules"
+
+echo "Backup tersimpan di: $BACKUP_DIR"
+
+echo "[5/7] Update app.js, app_user.js, dan modules/..."
+cp "$SRC_DIR/app.js" "$BOT_DIR/app.js"
+cp "$SRC_DIR/app_user.js" "$BOT_DIR/app_user.js"
+
+mkdir -p "$BOT_DIR/modules"
+cp -r "$SRC_DIR/modules/." "$BOT_DIR/modules/"
+
+echo "[6/7] Cek syntax Node.js..."
 cd "$BOT_DIR"
 
-# Simpan checksum package.json untuk tahu perlu npm install atau tidak.
-OLD_PKG_SUM=""
-if [ -f package.json ]; then
-  OLD_PKG_SUM="$(sha256sum package.json | awk '{print $1}')"
-fi
+if command -v node >/dev/null 2>&1; then
+  node -c app.js
+  node -c app_user.js
 
-# Backup file yang tidak boleh hilang saat update.
-backup_path ".vars.json"
-backup_path "sellvpn.db"
-backup_path "ressel.db"
-backup_path "trial.db"
-backup_path "bot-combined.log"
-backup_path "bot-error.log"
-backup_path "receipts"
-backup_path "qris-cooldown-state.json"
-backup_path "qris-history-state.json"
-backup_path "orkut-rate-limit.json"
-backup_path "modules"
-
-# Stop sementara supaya file aman saat replace.
-pm2 stop "$APP_NAME" >/dev/null 2>&1 || true
-
-# Metode 1: kalau folder ini repo git, pakai git pull/reset.
-if [ -d .git ] && command -v git >/dev/null 2>&1; then
-  log "Mode update: git"
-  git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REPO_URL"
-  git fetch origin "$BRANCH"
-  git reset --hard "origin/$BRANCH"
-else
-  # Metode 2: download ZIP dari GitHub lalu copy, tanpa menghapus file penting.
-  log "Mode update: download zip GitHub"
-  rm -rf "$TMP_DIR"
-  mkdir -p "$TMP_DIR"
-  ZIP_URL="${ZIP_URL:-https://github.com/irulgood/BotVPN/archive/refs/heads/$BRANCH.tar.gz}"
-  log "Download: $ZIP_URL"
-  curl -L --retry 3 --connect-timeout 20 -o "$TMP_DIR/source.tar.gz" "$ZIP_URL"
-  tar -xzf "$TMP_DIR/source.tar.gz" -C "$TMP_DIR"
-  SRC_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-  if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
-    err "Gagal membaca hasil download repo."
-    exit 1
+  if [ -f "modules/payment-service.js" ]; then
+    node -c modules/payment-service.js
   fi
-
-  # Copy file baru. File penting akan direstore setelahnya.
-  shopt -s dotglob
-  for item in "$SRC_DIR"/*; do
-    base="$(basename "$item")"
-    case "$base" in
-      .git|node_modules|.vars.json|sellvpn.db|ressel.db|trial.db|receipts|bot-combined.log|bot-error.log)
-        continue
-        ;;
-    esac
-    rm -rf "$BOT_DIR/$base"
-    cp -a "$item" "$BOT_DIR/$base"
-  done
-  shopt -u dotglob
-fi
-
-# Restore file penting setelah update.
-restore_path ".vars.json"
-restore_path "sellvpn.db"
-restore_path "ressel.db"
-restore_path "trial.db"
-restore_path "receipts"
-restore_path "qris-cooldown-state.json"
-restore_path "qris-history-state.json"
-restore_path "orkut-rate-limit.json"
-
-# Pastikan .vars.json tetap ada.
-if [ ! -f "$BOT_DIR/.vars.json" ]; then
-  warn ".vars.json tidak ditemukan. Kalau ini install pertama, isi dulu .vars.json sebelum start bot."
-fi
-
-# Install dependency hanya kalau package.json berubah atau node_modules belum lengkap.
-NEW_PKG_SUM=""
-if [ -f package.json ]; then
-  NEW_PKG_SUM="$(sha256sum package.json | awk '{print $1}')"
-fi
-
-NEED_NPM=0
-if [ ! -d node_modules ]; then
-  NEED_NPM=1
-elif [ "$OLD_PKG_SUM" != "$NEW_PKG_SUM" ]; then
-  NEED_NPM=1
-elif ! node -e "require('winston'); require('axios'); require('telegraf'); require('express'); require('sqlite3')" >/dev/null 2>&1; then
-  NEED_NPM=1
-fi
-
-if [ "$NEED_NPM" = "1" ]; then
-  log "Dependency berubah/belum lengkap. Menjalankan npm install aman."
-  npm install winston axios telegraf express dotenv >/dev/null
-  npm_config_build_from_source=true npm install sqlite3@5.1.6 >/dev/null
 else
-  log "Dependency sudah lengkap. Skip npm install."
+  echo "WARNING: node tidak ditemukan, skip syntax check."
 fi
 
-# Validasi module utama.
-node -e "require('winston'); require('axios'); require('telegraf'); require('express'); require('sqlite3'); console.log('MODULE OK')"
-
-# Cek syntax file utama kalau ada.
-if [ -f app.js ]; then node --check app.js >/dev/null; fi
-if [ -f app_user.js ]; then node --check app_user.js >/dev/null; fi
-if [ -f modules/payment-service.js ]; then node --check modules/payment-service.js >/dev/null; fi
-
-# Restart/start PM2.
-if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
-  log "Restart PM2: $APP_NAME"
-  pm2 restart "$APP_NAME" --update-env
+echo "[7/7] Restart PM2..."
+if command -v pm2 >/dev/null 2>&1; then
+  if pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
+    pm2 restart "$PM2_NAME"
+  else
+    pm2 start app.js --name "$PM2_NAME"
+  fi
+  pm2 save
+  pm2 list
 else
-  log "Start PM2 baru: $APP_NAME"
-  pm2 start app.js --name "$APP_NAME" --restart-delay 5000 --max-memory-restart 300M
+  echo "WARNING: pm2 tidak ditemukan. Jalankan manual: node app.js"
 fi
 
-pm2 save >/dev/null || true
-pm2 list
+rm -rf "$TMP_DIR"
 
-log "Update selesai. Backup tersimpan di: $BACKUP_DIR"
-log "Cek log: pm2 logs $APP_NAME --lines 50"
+echo ""
+echo "Update selesai."
+echo "Yang diupdate: app.js, app_user.js, modules/"
+echo "Yang aman/tidak disentuh: .vars.json, sellvpn.db, trial.db, ressel.db"

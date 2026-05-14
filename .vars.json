@@ -13,4 +13,5 @@
   "AUTH_USERNAME_ORKUT": "-",
   "AUTH_TOKEN_ORKUT": "-",
   "WEB_MUTILASI_ORKUT": "https://app.orderkuota.com/api/v2/qris/mutasi/-"
+  "GOPAY_BASE_URL": "https://v1-gateway.autogopay.site"
 }

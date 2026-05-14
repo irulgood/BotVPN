@@ -51,6 +51,7 @@ function createPaymentEngine(options) {
   const qrisHistoryCacheMs = Math.max(Number(vars.QRIS_HISTORY_CACHE_MS || 10000), 5000);
   const qrisLoopIntervalMs = Math.max(Number(vars.QRIS_STATUS_LOOP_MS || 5000), 3000);
   const qrisHistorySharedStateFile = path.join(baseDir || process.cwd(), '.qris-history-state.json');
+  const gopayBaseUrl = String(vars.GOPAY_BASE_URL || 'https://v1-gateway.autogopay.site').replace(/\/+$/, '');
 
   let qrisStatusCheckRunning = false;
   let lastOrkutHistoryCheckAt = 0;
@@ -854,7 +855,7 @@ function createPaymentEngine(options) {
 
       if (vars.PAYMENT === 'GOPAY') {
         const res = await axios.post(
-          'https://api-gopay.sawargipay.cloud/qris/generate',
+          `${gopayBaseUrl}/qris/generate`,
           { amount: finalAmount },
           {
             headers: {
@@ -1127,7 +1128,7 @@ function createPaymentEngine(options) {
 
       if (vars.PAYMENT === 'GOPAY') {
         const res = await axios.post(
-          'https://api-gopay.sawargipay.cloud/qris/generate',
+          `${gopayBaseUrl}/qris/generate`,
           { amount: finalAmount },
           {
             headers: {
@@ -1287,7 +1288,7 @@ function createPaymentEngine(options) {
             }
 
             const res = await axios.post(
-              'https://api-gopay.sawargipay.cloud/qris/status',
+              `${gopayBaseUrl}/qris/status`,
               { transaction_id: deposit.transactionId },
               {
                 headers: {
@@ -1373,7 +1374,7 @@ function createPaymentEngine(options) {
             }
 
             const res = await axios.post(
-              'https://api-gopay.sawargipay.cloud/qris/status',
+              `${gopayBaseUrl}/qris/status`,
               { transaction_id: servicePayment.transactionId },
               {
                 headers: {

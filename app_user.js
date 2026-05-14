@@ -1674,11 +1674,7 @@ bot.action('cek_service', async (ctx) => {
     }
 
     const net = require('net');
-    const portLabels = {
-      22: 'VPS LOGIN',
-      80: 'NO TLS',
-      443: 'TLS'
-    };
+    const portsToCheck = [22, 80, 443];
 
     const checkTcpPort = (host, port, timeoutMs = 2500) => new Promise((resolve) => {
       const socket = new net.Socket();
@@ -1699,25 +1695,30 @@ bot.action('cek_service', async (ctx) => {
     });
 
     const lines = [];
-    lines.push('🔍 Cek status server dari database bot');
+    lines.push('🔍 Cek status server');
     lines.push('-------------------------------------------');
 
     for (const server of servers) {
       const name = server.nama_server || `Server ${server.id}`;
       const host = String(server.domain || '').trim();
-      lines.push('');
-      lines.push(`🌐 Server: ${name}`);
-      lines.push(`🔗 Domain: ${host || '-'}`);
 
       if (!host) {
-        lines.push('  ⚠️ Domain kosong, dilewati');
+        lines.push(`🌐 ${name}: OFFLINE ❌`);
         continue;
       }
 
-      for (const port of [22, 80, 443]) {
+      // Status ONLINE kalau minimal salah satu port utama terbuka.
+      // Port yang dicek: 22, 80, 443.
+      let online = false;
+      for (const port of portsToCheck) {
         const open = await checkTcpPort(host, port);
-        lines.push(`  Port ${port} (${portLabels[port]}): ${open ? 'OPEN ✅' : 'CLOSED ❌'}`);
+        if (open) {
+          online = true;
+          break;
+        }
       }
+
+      lines.push(`🌐 ${name}: ${online ? 'ONLINE ✅' : 'OFFLINE ❌'}`);
     }
 
     const output = lines.join('\n');

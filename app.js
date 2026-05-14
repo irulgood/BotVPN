@@ -1691,28 +1691,81 @@ bot.action('service_fix', async (ctx) => {
 
 const { exec } = require('child_process');
 
+
 bot.action('cek_service', async (ctx) => {
   try {
-    const message = await ctx.reply('⏳ Sedang mengecek status server...');
+    await ctx.answerCbQuery().catch(() => {});
+    await ctx.reply('⏳ Sedang mengecek status server yang terdaftar di bot...');
 
-    exec('chmod +x cek-port.sh && bash cek-port.sh', (error, stdout, stderr) => {
-      if (error) {
-        console.error(error);
-        return ctx.reply('❌ Terjadi kesalahan saat menjalankan pengecekan.');
-      }
-
-      const cleanOutput = stdout.replace(/\x1b\[[0-9;]*m/g, '');
-
-      ctx.reply(`📡 *Hasil Cek Port:*\n\n\`\`\`\n${cleanOutput}\n\`\`\``, {
-        parse_mode: 'Markdown'
+    const servers = await new Promise((resolve, reject) => {
+      db.all('SELECT id, nama_server, domain FROM Server ORDER BY id ASC', [], (err, rows) => {
+        if (err) return reject(err);
+        resolve(rows || []);
       });
     });
+
+    if (!servers.length) {
+      return ctx.reply('⚠️ Belum ada server yang terdaftar di bot. Tambahkan server dulu lewat menu admin.');
+    }
+
+    const net = require('net');
+    const portLabels = {
+      22: 'VPS LOGIN',
+      80: 'NO TLS',
+      443: 'TLS'
+    };
+
+    const checkTcpPort = (host, port, timeoutMs = 2500) => new Promise((resolve) => {
+      const socket = new net.Socket();
+      let done = false;
+
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        try { socket.destroy(); } catch (_) {}
+        resolve(ok);
+      };
+
+      socket.setTimeout(timeoutMs);
+      socket.once('connect', () => finish(true));
+      socket.once('timeout', () => finish(false));
+      socket.once('error', () => finish(false));
+      socket.connect(port, host);
+    });
+
+    const lines = [];
+    lines.push('🔍 Cek status server dari database bot');
+    lines.push('-------------------------------------------');
+
+    for (const server of servers) {
+      const name = server.nama_server || `Server ${server.id}`;
+      const host = String(server.domain || '').trim();
+      lines.push('');
+      lines.push(`🌐 Server: ${name}`);
+      lines.push(`🔗 Domain: ${host || '-'}`);
+
+      if (!host) {
+        lines.push('  ⚠️ Domain kosong, dilewati');
+        continue;
+      }
+
+      for (const port of [22, 80, 443]) {
+        const open = await checkTcpPort(host, port);
+        lines.push(`  Port ${port} (${portLabels[port]}): ${open ? 'OPEN ✅' : 'CLOSED ❌'}`);
+      }
+    }
+
+    const output = lines.join('\n');
+    await ctx.reply(`📡 *Hasil Cek Server:*
+
+\`\`\`
+${output.slice(0, 3500)}
+\`\`\``, { parse_mode: 'Markdown' });
   } catch (err) {
-    console.error(err);
-    ctx.reply('❌ Gagal menjalankan pengecekan server.');
+    logger.error('Gagal cek server dari database: ' + (err.message || err));
+    await ctx.reply('❌ Gagal menjalankan pengecekan server.');
   }
 });
-
 
 bot.action('kembali_ke_menu', async (ctx) => {
   await sendMainMenu(ctx);

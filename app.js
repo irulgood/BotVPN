@@ -477,7 +477,7 @@ const statusReseller = isReseller ? 'Reseller' : 'Bukan Reseller';
 
   const messageText = `
 ━━━━━━━━━━━━━━━━━━
-⚡ <b>${NAMA_STORE}</b> ⚡
+       ⚡ <b>${NAMA_STORE}</b> ⚡
 ━━━━━━━━━━━━━━━━━━
 
 🔐 <b>PREMIUM VPN BOT</b>

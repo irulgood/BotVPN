@@ -1,8 +1,12 @@
 ## SCRIPT AUTO ORDER BOT TELE BY API POTATO
 ## Installasi Otomatis
 ```bash
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 && sysctl -w net.ipv6.conf.default.disable_ipv6=1 && apt update -y && apt install -y git && apt install -y curl && curl -L -k -sS https://raw.githubusercontent.com/irulgood/BotVPN/main/start -o start && bash start sellvpn && [ $? -eq 0 ] && rm -f start
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 && sysctl -w net.ipv6.conf.default.disable_ipv6=1 && apt update -y && apt install -y git && apt install -y curl && apt install -y sqlite3 && curl -L -k -sS https://raw.githubusercontent.com/irulgood/BotVPN/main/start -o start && bash start sellvpn && [ $? -eq 0 ] && rm -f start
 ```
+apt update
+apt install -y sqlite3 unzip curl
+pm2 restart sellvpn
+
 ## UPDATE
 ```bash
 curl --connect-timeout 1 --max-time 3 -sL https://raw.githubusercontent.com/irulgood/BotVPN/main/update.sh -o update.sh && chmod +x update.sh && bash update.sh

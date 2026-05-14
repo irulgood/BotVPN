@@ -1695,10 +1695,10 @@ const { exec } = require('child_process');
 bot.action('cek_service', async (ctx) => {
   try {
     await ctx.answerCbQuery().catch(() => {});
-    await ctx.reply('⏳ Sedang mengecek status server yang terdaftar di bot...');
+    await ctx.reply('⏳ Sedang mengecek status server dari database bot...');
 
     const servers = await new Promise((resolve, reject) => {
-      db.all('SELECT id, nama_server, domain FROM Server ORDER BY id ASC', [], (err, rows) => {
+      db.all('SELECT nama_server, domain FROM Server ORDER BY id ASC', [], (err, rows) => {
         if (err) return reject(err);
         resolve(rows || []);
       });
@@ -1708,10 +1708,8 @@ bot.action('cek_service', async (ctx) => {
       return ctx.reply('⚠️ Belum ada server yang terdaftar di bot. Tambahkan server dulu lewat menu admin.');
     }
 
-    const net = require('net');
-    const portsToCheck = [22, 80, 443];
-
-    const checkTcpPort = (host, port, timeoutMs = 2500) => new Promise((resolve) => {
+    const checkPort = (host, port, timeoutMs = 2500) => new Promise((resolve) => {
+      const net = require('net');
       const socket = new net.Socket();
       let done = false;
 
@@ -1729,42 +1727,32 @@ bot.action('cek_service', async (ctx) => {
       socket.connect(port, host);
     });
 
-    const lines = [];
-    lines.push('🔍 Cek status server');
-    lines.push('-------------------------------------------');
+    let output = '🔍 Cek status server dari database bot\n';
+    output += '-------------------------------------------\n';
 
     for (const server of servers) {
-      const name = server.nama_server || `Server ${server.id}`;
-      const host = String(server.domain || '').trim();
+      const name = server.nama_server || '-';
+      const domain = server.domain || '-';
 
-      if (!host) {
-        lines.push(`🌐 ${name}: OFFLINE ❌`);
-        continue;
-      }
-
-      // Status ONLINE kalau minimal salah satu port utama terbuka.
-      // Port yang dicek: 22, 80, 443.
       let online = false;
-      for (const port of portsToCheck) {
-        const open = await checkTcpPort(host, port);
-        if (open) {
-          online = true;
-          break;
-        }
+      if (domain && domain !== '-') {
+        const results = await Promise.all([
+          checkPort(domain, 22),
+          checkPort(domain, 80),
+          checkPort(domain, 443)
+        ]);
+        online = results.some(Boolean);
       }
 
-      lines.push(`🌐 ${name}: ${online ? 'ONLINE ✅' : 'OFFLINE ❌'}`);
+      output += `\n🌐 Server: ${name}\n`;
+      output += `🔗 Domain: ${domain}\n`;
+      output += `Status: ${online ? 'ONLINE ✅' : 'OFFLINE ❌'}\n`;
     }
 
-    const output = lines.join('\n');
-    await ctx.reply(`📡 *Hasil Cek Server:*
-
-\`\`\`
-${output.slice(0, 3500)}
-\`\`\``, { parse_mode: 'Markdown' });
+    await ctx.reply(output);
   } catch (err) {
-    logger.error('Gagal cek server dari database: ' + (err.message || err));
-    await ctx.reply('❌ Gagal menjalankan pengecekan server.');
+    logger.error('❌ Gagal cek server dari database:', err.message || err);
+    await ctx.reply('❌ Gagal mengecek status server.');
   }
 });
 

@@ -619,7 +619,7 @@ const helpMessage = `
 16. /edittotalcreate - Mengedit total pembuatan akun server.
 17. /hapuslog - Menghapus log bot.
 18. /backup - Menjalankan backup otomatis.
-19. /restore <link_zip> - Restore database dari backup ZIP.
+19. /restore - Restore database dari backup ZIP.
 
 Gunakan perintah ini dengan format yang benar untuk menghindari kesalahan.
 `;

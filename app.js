@@ -2723,7 +2723,7 @@ if (state.step?.startsWith('username_fix_')) {
         state.step = `password_${state.action}_${state.type}`;
         await ctx.reply('🔑 *Masukkan password:*', { parse_mode: 'Markdown' });
       } else if (type === 'zivudp') {
-        state.password = state.username;
+        state.password = 'irultun21';
         state.step = `exp_${state.action}_${state.type}`;
         await ctx.reply('⏳ *Masukkan masa aktif (hari):*', { parse_mode: 'Markdown' });
       } else {

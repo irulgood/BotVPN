@@ -2211,6 +2211,7 @@ await bot.telegram.sendMessage(
   GROUP_ID,
   `<blockquote>
 ⌛ <b>Trial Account Created</b>
+🤖 <b>BOT VPN:</b> @vpnirultunbot
 ━━━━━━━━━━━━━━━━━━━━
 👤 <b>User:</b> ${ctx.from.first_name} (${ctx.from.id})
 🧾 <b>Type:</b> ${type.toUpperCase()}

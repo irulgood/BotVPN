@@ -2296,6 +2296,7 @@ const maskedUsername = username.length > 1
   : username; // Kalau kurang dari 3 char, tampilkan tanpa masking
 await safeGroupSend(
   `⌛ <b>Trial Account Created</b>
+🤖 <b>BOT VPN:</b> @vpnirultunbot
 ━━━━━━━━━━━━━━━━━━━━
 👤 <b>User:</b> ${ctx.from.first_name} (${ctx.from.id})
 🧾 <b>Type:</b> ${type === 'zivudp' ? 'ZIV UDP' : type.toUpperCase()}

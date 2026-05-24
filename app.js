@@ -1115,55 +1115,55 @@ async function handleServiceAction(ctx, action) {
   let keyboard;
   if (action === 'create') {
     keyboard = [
-      [{ text: 'Buat Ssh/Ovpn', callback_data: 'create_ssh' }],      
+      [{ text: 'Buat Ssh', callback_data: 'create_ssh' }],      
       [{ text: 'Buat Vmess', callback_data: 'create_vmess' }, { text: 'Buat Vless', callback_data: 'create_vless' }],
-      [{ text: 'Buat Trojan', callback_data: 'create_trojan' }, { text: 'Buat ZIV UDP', callback_data: 'create_zivudp' }],
+      [{ text: 'Buat Trojan', callback_data: 'create_trojan' }],
       [{ text: '🔙 Kembali', callback_data: 'send_main_menu' }]
     ];
   } else if (action === 'trial') {
     keyboard = [
-      [{ text: 'Trial Ssh/Ovpn', callback_data: 'trial_ssh' }],      
+      [{ text: 'Trial Ssh', callback_data: 'trial_ssh' }],      
       [{ text: 'Trial Vmess', callback_data: 'trial_vmess' }, { text: 'Trial Vless', callback_data: 'trial_vless' }],
-      [{ text: 'Trial Trojan', callback_data: 'trial_trojan' }, { text: 'Trial ZIV UDP', callback_data: 'trial_zivudp' }],
+      [{ text: 'Trial Trojan', callback_data: 'trial_trojan' }],
       [{ text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } else if (action === 'renew') {
     keyboard = [
-      [{ text: 'Perpanjang Ssh/Ovpn', callback_data: 'renew_ssh' }],      
+      [{ text: 'Perpanjang Ssh', callback_data: 'renew_ssh' }],      
       [{ text: 'Perpanjang Vmess', callback_data: 'renew_vmess' }, { text: 'Perpanjang Vless', callback_data: 'renew_vless' }],
-      [{ text: 'Perpanjang Trojan', callback_data: 'renew_trojan' }, { text: 'Perpanjang ZIV UDP', callback_data: 'renew_zivudp' }],
+      [{ text: 'Perpanjang Trojan', callback_data: 'renew_trojan' }],
       [{ text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } else if (action === 'del') {
     keyboard = [
-      [{ text: 'Hapus Ssh/Ovpn', callback_data: 'del_ssh' }],      
+      [{ text: 'Hapus Ssh', callback_data: 'del_ssh' }],      
       [{ text: 'Hapus Vmess', callback_data: 'del_vmess' }, { text: 'Hapus Vless', callback_data: 'del_vless' }],
-      [{ text: 'Hapus Trojan', callback_data: 'del_trojan' }, { text: 'Hapus ZIV UDP', callback_data: 'del_zivudp' }],
+      [{ text: 'Hapus Trojan', callback_data: 'del_trojan' }],
       [{ text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } else if (action === 'lock') {
     keyboard = [
-      [{ text: 'Lock Ssh/Ovpn', callback_data: 'lock_ssh' }],      
+      [{ text: 'Lock Ssh', callback_data: 'lock_ssh' }],      
       [{ text: 'Lock Vmess', callback_data: 'lock_vmess' }, { text: 'Lock Vless', callback_data: 'lock_vless' }],
       [{ text: 'Lock Trojan', callback_data: 'lock_trojan' }, { text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } else if (action === 'unlock') {
     keyboard = [
-      [{ text: 'Unlock Ssh/Ovpn', callback_data: 'unlock_ssh' }],      
+      [{ text: 'Unlock Ssh', callback_data: 'unlock_ssh' }],      
       [{ text: 'Unlock Vmess', callback_data: 'unlock_vmess' }, { text: 'Unlock Vless', callback_data: 'unlock_vless' }],
       [{ text: 'Unlock Trojan', callback_data: 'unlock_trojan' }, { text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } else if (action === 'changelimip') {
     keyboard = [
-      [{ text: 'Change Limit Ssh/Ovpn', callback_data: 'changelimip_ssh' }],      
+      [{ text: 'Change Limit Ssh', callback_data: 'changelimip_ssh' }],      
       [{ text: 'Change Limit Vmess', callback_data: 'changelimip_vmess' }, { text: 'Change Limit Vless', callback_data: 'changelimip_vless' }],
       [{ text: 'Change Limit Trojan', callback_data: 'changelimip_trojan' }, { text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } else if (action === 'fix') {
     keyboard = [
-      [{ text: 'Fix Ssh/Ovpn', callback_data: 'fix_ssh' }],      
+      [{ text: 'Fix Ssh', callback_data: 'fix_ssh' }],      
       [{ text: 'Fix Vmess', callback_data: 'fix_vmess' }, { text: 'Fix Vless', callback_data: 'fix_vless' }],
-      [{ text: 'Fix Trojan', callback_data: 'fix_trojan' }, { text: 'Fix ZIV UDP', callback_data: 'fix_zivudp' }],
+      [{ text: 'Fix Trojan', callback_data: 'fix_trojan' }],
       [{ text: '🔙 Kembali', callback_data: 'send_main_menu' }],
     ];
   } 

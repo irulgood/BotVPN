@@ -127,7 +127,7 @@ Host: bug.com
 Connection: Upgrade
 User-Agent: [ua]
 Upgrade: websocket
-\`
+\`\`\`
 
 
 📥 *Download All Config UNLOCK SSH*:

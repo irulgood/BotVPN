@@ -22,14 +22,14 @@ if (!/^[a-z0-9-]+$/.test(username)) {
       const web_URL = `http://${domain}${param}`; // misalnya: http://idnusastb.domain.web.id/vps/sshvpn
       const AUTH_TOKEN = server.auth;
       const days = exp;
-      const KUOTA = "0"; // jika perlu di-hardcode, bisa diubah jadi parameter juga
+      const KUOTA = "1"; // jika perlu di-hardcode, bisa diubah jadi parameter juga
       const LIMIT_IP = iplimit;
 
   const curlCommand = `curl -sS --connect-timeout 1 --max-time 30 -X POST "${web_URL}" \
 -H "Authorization: ${AUTH_TOKEN}" \
 -H "Content-Type: application/json" \
 -H "Accept: application/json" \
--d '{"timelimit":"3h"}'`;
+-d '{"timelimit":"1h"}'`;
 
       exec(curlCommand, (err, stdout, stderr) => {
   // 1) Curl error / exit code error
@@ -187,7 +187,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 -H "Authorization: ${AUTH_TOKEN}" \
 -H "Content-Type: application/json" \
 -H "Accept: application/json" \
--d '{"timelimit":"3h"}'`;
+-d '{"timelimit":"1h"}'`;
 
       exec(curlCommand, (err, stdout, stderr) => {
   // 1) Curl error / exit code error
@@ -330,7 +330,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 -H "Authorization: ${AUTH_TOKEN}" \
 -H "Content-Type: application/json" \
 -H "Accept: application/json" \
--d '{"timelimit":"3h"}'`;
+-d '{"timelimit":"1h"}'`;
 
       exec(curlCommand, (err, stdout, stderr) => {
   // 1) Curl error / exit code error
@@ -471,7 +471,7 @@ if (!/^[a-z0-9-]+$/.test(username)) {
 -H "Authorization: ${AUTH_TOKEN}" \
 -H "Content-Type: application/json" \
 -H "Accept: application/json" \
--d '{"timelimit":"3h"}'`;
+-d '{"timelimit":"1h"}'`;
 
       exec(curlCommand, (err, stdout, stderr) => {
   // 1) Curl error / exit code error
